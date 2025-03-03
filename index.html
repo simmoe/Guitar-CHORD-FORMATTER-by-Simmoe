@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Raleway:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/p5.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/skeleton/2.0.4/skeleton.min.css"/>
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <meta charset="utf-8" />
+    <title>Chord formatter by Simmoe</title>
+  </head>
+  <body>
+    <main>
+    <div id="page1" class="page visible">
+        <h2>Indsæt sangtekst</h2>
+        <textarea id="inputArea">
+        </textarea>
+        <button id="formatButton">Formatér sangtekst</button>
+    </div>
+
+    <div id="page2" class="page">
+        <h2>Formateret sangtekst</h2>
+        <div id="outputDiv" style="white-space: pre-wrap;" class="scrollable"></div>
+        <button id="backButton">Tilbage</button>
+    </div>
+
+    </main>
+    <script src="sketch.js"></script>
+  </body>
+</html>
+

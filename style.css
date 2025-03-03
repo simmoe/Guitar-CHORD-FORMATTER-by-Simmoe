@@ -1,0 +1,64 @@
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&family=Oxygen:wght@300;400;700&display=swap');
+
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing: border-box;
+    font-family:Oxygen;
+}
+
+.page{
+    position:fixed;
+    top:0;
+    left:-100vw;
+    width:100vw;
+    height: 100vh;
+    overflow:hidden;
+    display:grid;
+    place-items:center;
+    transition: 0.3s 0.3s all ease-in-out;
+}
+
+.visible{
+    left:0;
+    transition: 0.3s all ease-in-out;
+}
+
+#outputDiv{
+    display:grid;
+    background:whitesmoke;
+}
+
+.chord {
+    vertical-align: super;
+}
+
+#inputArea, #outputDiv{
+  width:80vw;
+  height:80vh;
+}
+
+.scrollable {
+    overflow-y: auto;
+    font-size:15px;
+}
+
+
+.chord::first-letter {
+    text-transform: uppercase;
+}
+
+
+#page1{
+    background-color: lightskyblue;
+}
+
+#page2{
+    background-color: lightgreen;
+}
+
+h1{
+    font-family: Raleway;
+    color:hotpink;
+}
