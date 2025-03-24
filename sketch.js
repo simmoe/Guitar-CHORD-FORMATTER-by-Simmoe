@@ -162,10 +162,6 @@ function shiftPage(num) {
     select("#page" + currentPage).addClass('visible');
 }
 
-function keyPressed(){
-    shiftPage(key);
-}
-
     
 
 // Fallback til ældre browsere
