@@ -1,6 +1,10 @@
 let currentPage = 1
 let pages
 
+// Regex pattern for flexible chord detection (Root + Modifier + Bass)
+// Modifier includes common chord symbols but excludes characters likely to be in normal words (e.g. h, k, r, v, w, etc.)
+const chordPattern = "[A-G][#b]?([majsudigotb0-9#\\+\\-\\(\\)\\^∆°ø]*)(/[A-G][#b]?)?";
+
 function setup() {
     noCanvas();
     pages = selectAll('.page');
@@ -10,6 +14,7 @@ function setup() {
     let formatButton = select('#formatButton');
     let outputDiv = select('#outputDiv').addClass('scrollable');
     let backButton = select('#backButton');
+    let copyButton = select('#copyButton');
 
     // Når outputDiv klikkes, toggler vi full-screen klassen
     outputDiv.mouseClicked(() => {
@@ -21,6 +26,10 @@ function setup() {
         formatLyrics(inputArea, outputDiv);
         shiftPage(2);
     });
+    
+    copyButton.mousePressed(() => {
+        copyToClipboard(outputDiv, copyButton);
+    });
             
     backButton.mousePressed(() => {
         inputArea.value('')
@@ -31,61 +40,98 @@ function setup() {
 
 
 function formatLyrics(inputArea, outputDiv) {
-    let inputText = inputArea.value()
-    let lines = inputText.split('\n')
-    let formattedOutput = []
+    let inputText = inputArea.value();
+    
+    // Smart formatting: 
+    // 1. Trim leading/trailing whitespace
+    inputText = inputText.trim();
+    // 2. Collapse 3 or more newlines into 2 (leaving 1 empty line in between)
+    // Matches 2 or more empty lines (which is 3 or more newlines) and replaces with 2 newlines
+    inputText = inputText.replace(/\n\s*\n\s*\n/g, '\n\n'); 
+    // Also handle just 2 newlines if valid, but we really want to prevent *excessive* space.
+    // The user said "No double empty rows".
+    // 1 empty row = \n\n. 2 empty rows = \n\n\n.
+    // Let's replace 3+ \n with 2 \n.
+    inputText = inputText.replace(/(\n\s*){3,}/g, '\n\n');
 
-    //hvis sidste linje var en akkord linje - og denne linje er en tekst linje skal vi lægge dem sammen
+    let lines = inputText.split('\n')
+    let gridItems = []
+
     let p = 'not-chords'
 
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i]
+        let lyricsCell = ''
+        let rhythmCell = ''
 
-        //skema linje - udelades 
         if(line.includes('--')){
-            //formattedOutput.push(`<div class='schematic-line'>${line}</div>`)
+            lyricsCell = line
+            rhythmCell = ''
             p = 'not-chords'
         }
-        //form linje - udskiftes med linebreak 
-        else if(line.includes('[') || line.includes('Chorus') || line.includes('Verse')){
-            console.log('added line break')
-            formattedOutput.push(`<div class='form-line'><br></div>`)
+        else if(line.includes('[') || line.includes('Chorus') || line.includes('Verse')){
+            lyricsCell = line
+            rhythmCell = ''
             p = 'not-chords'
         }
-        //akkordlinje
-        else if (
-/^[A-G][#b]?(maj7|m7|m|7|dim|sus[24]|add\d+)?(\/[A-G][#b]?)?,?(\s+[A-G][#b]?(maj7|m7|m|7|dim|sus[24]|add\d+)?(\/[A-G][#b]?)?,?)*$/
-            .test(line.trim())) {
-            //console.log('chord line')
+        else if (new RegExp(`^${chordPattern},?(\\s+${chordPattern},?)*$`).test(line.trim())) {
             p = 'chords'
-            //formattedOutput.push(`<div class='chord-line'>${line}</div>`)
+            continue
         } 
-        // Hvis næste linje er en tekstlinje, par den korrekt
         else if (line.trim() != '') {
-            //console.log('lyrics line', p, i, formattedOutput.length)
             if(p == 'chords'){
-                //læg linjerne sammen
-                let combine = formatChordTextPair(lines[i-1], line)
-                formattedOutput.push(`<div class='text-chord-line'>${combine}</div>`)
+                lyricsCell = formatChordTextPair(lines[i-1], line)
+                rhythmCell = extractRhythmPattern(lines[i-1])
                 p = "not-chords"
+            } else {
+                lyricsCell = line
+                rhythmCell = ''
             }
         } 
         else {
-            //formattedOutput.push(`<div class='neither-line'>${line}</div>`)
+            lyricsCell = ' '
+            rhythmCell = ''
             p = "not-chords"
         }
+
+        gridItems.push(`<div class="lyrics-cell">${lyricsCell}</div>`)
+        gridItems.push(`<div class="rhythm-cell">${rhythmCell}</div>`)
     }
-    outputDiv.style('white-space', 'pre-wrap');
-    outputDiv.html(formattedOutput.join('\n'));
+    
+    let htmlOutput = `<div class="chord-grid">${gridItems.join('')}</div>`
+    outputDiv.html(htmlOutput);
 }
 
+function extractRhythmPattern(chordLine) {
+    let chords = [];
+    let regex = new RegExp(`(${chordPattern})(?:,|\\s|$)`, 'g');
+    let match;
+    
+    while ((match = regex.exec(chordLine)) !== null) {
+        if (match[1]) {
+            let fullChord = match[1];
+            let tone = fullChord;
+            
+            if (fullChord.includes('/')) {
+                 tone = fullChord.split('/')[1];
+            } else {
+                 let rootMatch = fullChord.match(/^[A-G][#b]?/);
+                 if (rootMatch) tone = rootMatch[0];
+            }
+            chords.push(`<b>${tone}</b>`);
+        }
+    }
+    
+    // Format as rhythm pattern with | separators
+    return chords.join(' | ');
+}
 
 
 function formatChordTextPair(chordLine, lyricLine) {
     let formattedLine = '';
     let chordMatches = [];
     // Regex der matcher akkorder inkl. m7, add-typer, og et valgfrit komma
-    let regex = /([A-G][#b]?(maj7|m7|m|7|dim|sus[24]|add\d+)?(\/[A-G][#b]?)?,?)/g;
+    let regex = new RegExp(`(${chordPattern},?)`, 'g');
     let match;
     
     while ((match = regex.exec(chordLine)) !== null) {
@@ -162,6 +208,72 @@ function shiftPage(num) {
     select("#page" + currentPage).addClass('visible');
 }
 
+
+function copyToClipboard(outputDiv, button) {
+    // Generate a temporary table for copying to preserve layout
+    let lyricsCells = outputDiv.elt.querySelectorAll('.lyrics-cell');
+    let rhythmCells = outputDiv.elt.querySelectorAll('.rhythm-cell');
+    
+    // Explicitly zero out border spacing and collapse borders
+    let tableHTML = '<table cellpadding="0" cellspacing="0" style="width:100%; border-collapse: collapse; border-spacing: 0; border: none; font-family: sans-serif;">';
+    
+    for(let i = 0; i < lyricsCells.length; i++) {
+        let lContent = lyricsCells[i].innerHTML;
+        let rContent = rhythmCells[i] ? rhythmCells[i].innerHTML : '';
+        
+        // Make sup tags compact to avoid expanding line height but keep font size normal
+        lContent = lContent.replace(/<sup/g, '<sup style="line-height: 0; vertical-align: super;"');
+
+        tableHTML += '<tr>';
+        // Left column: Lyrics and chords (preserved sup tags) - Give it 80% width and prevent wrapping
+        // Explicitly removed font-size restriction (inherits user agent default ~12pt usually) and kept tight line-height
+        tableHTML += `<td style="width: 80%; vertical-align: bottom; padding: 0; line-height: 1; border: none; white-space: nowrap;">${lContent}</td>`;
+        // Right column: Bass rhythm
+        tableHTML += `<td style="width: 20%; vertical-align: bottom; text-align: right; line-height: 1; white-space: nowrap; padding: 0; border: none;">${rContent}</td>`;
+        tableHTML += '</tr>';
+    }
+    tableHTML += '</table>';
+
+    // Helper to show visual feedback on the button
+    const showSuccess = () => {
+        if(button) {
+            let originalText = button.html();
+            button.html("Kopieret!");
+            setTimeout(() => button.html(originalText), 2000);
+        }
+    };
+
+    // Use Blob and ClipboardItem for rich text copy
+    try {
+        const blobHtml = new Blob([tableHTML], { type: "text/html" });
+        const blobText = new Blob([outputDiv.elt.innerText], { type: "text/plain" });
+        const data = [new ClipboardItem({ 
+            "text/html": blobHtml,
+            "text/plain": blobText 
+        })];
+
+        navigator.clipboard.write(data).then(function() {
+            showSuccess();
+        }, function(err) {
+            console.error("Kunne ikke kopiere: ", err);
+            fallbackCopy(outputDiv.elt.innerText);
+        });
+    } catch (e) {
+        // Fallback for browsers that don't support ClipboardItem (e.g. Firefox default config sometimes)
+        console.error("ClipboardItem error, trying fallback listener", e);
+        
+        // Listener-based fallback
+        function listener(e) {
+            e.clipboardData.setData("text/html", tableHTML);
+            e.clipboardData.setData("text/plain", outputDiv.elt.innerText);
+            e.preventDefault();
+        }
+        document.addEventListener("copy", listener);
+        document.execCommand("copy");
+        document.removeEventListener("copy", listener);
+        showSuccess();
+    }
+}
     
 
 // Fallback til ældre browsere

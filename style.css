@@ -27,9 +27,15 @@
 
 #outputDiv{
     display:grid;
-    background:whitesmoke;
+    background:white;
 }
 
+.chord-grid{
+    width:100%;
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+
+}
 .chord {
     vertical-align: super;
 }
