@@ -12,7 +12,7 @@ function setup() {
     // Hent elementer fra HTML
     let inputArea = select('#inputArea');
     let formatButton = select('#formatButton');
-    let outputDiv = select('#outputDiv').addClass('scrollable');
+    let outputDiv = select('#outputDiv').addClass('scrollable').attribute('tabindex', '0');
     let backButton = select('#backButton');
     let copyButton = select('#copyButton');
 
@@ -36,6 +36,9 @@ function setup() {
         outputDiv.html('')
         shiftPage(1);
     });
+
+    // Start med fokus på input
+    inputArea.elt.focus();
 }
 
 
@@ -69,9 +72,11 @@ function formatLyrics(inputArea, outputDiv) {
             rhythmCell = ''
             p = 'not-chords'
         }
-        else if(line.includes('[') || line.includes('Chorus') || line.includes('Verse')){
-            lyricsCell = line
-            rhythmCell = ''
+        else if(isSectionHeader(line)){
+            // Replace brackets and trim
+            let cleanLine = line.replace(/[\[\]]/g, '').trim(); 
+            lyricsCell = formatSectionHeader(cleanLine)
+            rhythmCell = lyricsCell // Repeat logic for right side as well
             p = 'not-chords'
         }
         else if (new RegExp(`^${chordPattern},?(\\s+${chordPattern},?)*$`).test(line.trim())) {
@@ -92,6 +97,8 @@ function formatLyrics(inputArea, outputDiv) {
             lyricsCell = ' '
             rhythmCell = ''
             p = "not-chords"
+            // Skip empty rows completely
+            continue;
         }
 
         gridItems.push(`<div class="lyrics-cell">${lyricsCell}</div>`)
@@ -104,25 +111,25 @@ function formatLyrics(inputArea, outputDiv) {
 
 function extractRhythmPattern(chordLine) {
     let chords = [];
-    let regex = new RegExp(`(${chordPattern})(?:,|\\s|$)`, 'g');
+    // Find alle akkorder i linjen (ignorer eksisterende rør/pipes da vi selv formaterer)
+    let regex = new RegExp(`(${chordPattern})`, 'g');
     let match;
     
     while ((match = regex.exec(chordLine)) !== null) {
-        if (match[1]) {
-            let fullChord = match[1];
-            let tone = fullChord;
-            
-            if (fullChord.includes('/')) {
-                 tone = fullChord.split('/')[1];
-            } else {
-                 let rootMatch = fullChord.match(/^[A-G][#b]?/);
-                 if (rootMatch) tone = rootMatch[0];
-            }
-            chords.push(`<b>${tone}</b>`);
+        let fullChord = match[0];
+        let tone = fullChord;
+        
+        // Find bastone eller rod
+        if (fullChord.includes('/')) {
+                tone = fullChord.split('/')[1];
+        } else {
+                let rootMatch = fullChord.match(/^[A-G][#b]?/);
+                if (rootMatch) tone = rootMatch[0];
         }
+        chords.push(`<b>${tone}</b>`);
     }
     
-    // Format as rhythm pattern with | separators
+    // Join konsekvent med ' | ' for at angive "en takt pr. akkord" som standard
     return chords.join(' | ');
 }
 
@@ -206,6 +213,16 @@ function shiftPage(num) {
     select("#page" + currentPage).removeClass('visible');
     currentPage = num;
     select("#page" + currentPage).addClass('visible');
+
+    // Sæt fokus på det relevante element (input eller output) når siden skifter
+    // Vi bruger en lille timeout, så slide-animationen er færdig først
+    setTimeout(() => {
+        if(currentPage === 1) {
+            select('#inputArea').elt.focus();
+        } else if (currentPage === 2) {
+            select('#outputDiv').elt.focus();
+        }
+    }, 350);
 }
 
 
@@ -215,7 +232,8 @@ function copyToClipboard(outputDiv, button) {
     let rhythmCells = outputDiv.elt.querySelectorAll('.rhythm-cell');
     
     // Explicitly zero out border spacing and collapse borders
-    let tableHTML = '<table cellpadding="0" cellspacing="0" style="width:100%; border-collapse: collapse; border-spacing: 0; border: none; font-family: sans-serif;">';
+    // Try forcing width via HTML attribute and minimal CSS width to encourage shrink-to-fit behavior
+    let tableHTML = '<table width="1" cellpadding="0" cellspacing="0" style="width: auto; border-collapse: collapse; border-spacing: 0; border: none; font-family: sans-serif;">';
     
     for(let i = 0; i < lyricsCells.length; i++) {
         let lContent = lyricsCells[i].innerHTML;
@@ -225,11 +243,10 @@ function copyToClipboard(outputDiv, button) {
         lContent = lContent.replace(/<sup/g, '<sup style="line-height: 0; vertical-align: super;"');
 
         tableHTML += '<tr>';
-        // Left column: Lyrics and chords (preserved sup tags) - Give it 80% width and prevent wrapping
-        // Explicitly removed font-size restriction (inherits user agent default ~12pt usually) and kept tight line-height
-        tableHTML += `<td style="width: 80%; vertical-align: bottom; padding: 0; line-height: 1; border: none; white-space: nowrap;">${lContent}</td>`;
-        // Right column: Bass rhythm
-        tableHTML += `<td style="width: 20%; vertical-align: bottom; text-align: right; line-height: 1; white-space: nowrap; padding: 0; border: none;">${rContent}</td>`;
+        // Left column: Lyrics and chords. width: 1% forces cell to shrink to content width
+        tableHTML += `<td style="width: 1%; vertical-align: bottom; padding: 0; line-height: 1; border: none; white-space: nowrap;">${lContent}</td>`;
+        // Right column: Bass rhythm. width: 1% forces cell to shrink to content width
+        tableHTML += `<td style="width: 1%; vertical-align: bottom; text-align: right; line-height: 1; white-space: nowrap; padding: 0; border: none;">${rContent}</td>`;
         tableHTML += '</tr>';
     }
     tableHTML += '</table>';
@@ -284,4 +301,38 @@ function fallbackCopy(text) {
     textArea.select()
     document.execCommand("copy")
     document.body.removeChild(textArea)
+}
+
+function isSectionHeader(line) {
+    const l = line.trim().toLowerCase();
+    if (l.length > 50) return false; 
+    return l.startsWith('[') || 
+           l.includes('verse') || 
+           l.includes('vers') || 
+           l.includes('chorus') || 
+           l.includes('omkvæd') || 
+           l.includes('bridge') || 
+           l.includes('c-stykke') ||
+           l.includes('intro') ||
+           l.includes('outro');
+}
+
+function formatSectionHeader(text) {
+    const t = text.trim().toLowerCase();
+    let bg = '#eeeeee'; // default gray
+    
+    if (t.includes('verse') || t.includes('vers')) {
+        bg = '#e8f5e9'; // Pale Green
+    } else if (t.includes('chorus') || t.includes('omkvæd')) {
+        bg = '#ffebee'; // Pale Red
+    } else if (t.includes('bridge') || t.includes('c-stykke')) {
+        bg = '#fff3e0'; // Pale Orange
+    } else if (t.includes('intro')) {
+        bg = '#e3f2fd'; // Pale Blue
+    } else if (t.includes('outro')) {
+        bg = '#f3e5f5'; // Pale Purple
+    }
+    
+    // Compact style with background color
+    return `<div style="background-color: ${bg}; padding: 5px 6px; border-radius: 4px; font-weight: bold; width: 100%; box-sizing: border-box; font-size: 0.9em;">${text}</div>`;
 }
