@@ -17,7 +17,15 @@
         <h2>Indsæt sangtekst</h2>
         <textarea id="inputArea">
         </textarea>
-        <button id="formatButton">Formatér sangtekst</button>
+        <div class="row" style="align-items: center; gap: 1em;">
+          <label for="barsPerLine">Takter pr. linje:</label>
+          <select id="barsPerLine">
+            <option value="2">2</option>
+            <option value="4" selected>4</option>
+            <option value="8">8</option>
+          </select>
+          <button id="formatButton">Formatér sangtekst</button>
+        </div>
     </div>
 
     <div id="page2" class="page">

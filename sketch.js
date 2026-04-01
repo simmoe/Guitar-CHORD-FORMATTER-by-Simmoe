@@ -79,6 +79,27 @@ function formatLyrics(inputArea, outputDiv) {
             rhythmCell = lyricsCell // Repeat logic for right side as well
             p = 'not-chords'
         }
+        else if (isPipeChordLine(line)) {
+            // Check if the next non-empty line is lyrics (not chords, not header)
+            let nextIdx = i + 1;
+            while (nextIdx < lines.length && lines[nextIdx].trim() === '') nextIdx++;
+            let nextLine = nextIdx < lines.length ? lines[nextIdx] : '';
+            let nextIsLyrics = nextLine.trim() !== '' 
+                && !isSectionHeader(nextLine) 
+                && !isPipeChordLine(nextLine)
+                && !new RegExp(`^${chordPattern},?(\\s+${chordPattern},?)*$`).test(nextLine.trim());
+            
+            if (nextIsLyrics) {
+                // Treat as chord line for the upcoming lyric line
+                p = 'chords'
+                continue
+            } else {
+                // Standalone pipe chord line (e.g. intro)
+                lyricsCell = line.trim()
+                rhythmCell = extractRhythmPattern(line)
+                p = 'not-chords'
+            }
+        }
         else if (new RegExp(`^${chordPattern},?(\\s+${chordPattern},?)*$`).test(line.trim())) {
             p = 'chords'
             continue
@@ -110,8 +131,7 @@ function formatLyrics(inputArea, outputDiv) {
 }
 
 function extractRhythmPattern(chordLine) {
-    let chords = [];
-    // Find alle akkorder i linjen (ignorer eksisterende rør/pipes da vi selv formaterer)
+    let chordsWithPos = [];
     let regex = new RegExp(`(${chordPattern})`, 'g');
     let match;
     
@@ -126,73 +146,136 @@ function extractRhythmPattern(chordLine) {
                 let rootMatch = fullChord.match(/^[A-G][#b]?/);
                 if (rootMatch) tone = rootMatch[0];
         }
-        chords.push(`<b>${tone}</b>`);
+        let label = `<b style="display:inline-block;min-width:2em;text-align:center;">${tone}</b>`;
+        chordsWithPos.push({ label, pos: match.index });
     }
     
-    // Join konsekvent med ' | ' for at angive "en takt pr. akkord" som standard
-    return chords.join(' | ');
+    if (chordsWithPos.length === 0) return '';
+    
+    let barsPerLine = parseInt(select('#barsPerLine').value()) || 4;
+    
+    // Fordel akkorder i takter baseret på deres position i linjen
+    let lineLen = Math.max(chordLine.length, 1);
+    let barWidth = lineLen / barsPerLine;
+    
+    // Opret takter (bars) som arrays
+    let bars = [];
+    for (let b = 0; b < barsPerLine; b++) bars.push([]);
+    
+    for (let c of chordsWithPos) {
+        let barIndex = Math.min(Math.floor(c.pos / barWidth), barsPerLine - 1);
+        bars[barIndex].push(c.label);
+    }
+    
+    // Fyld tomme takter med den senest kendte akkord
+    let lastChord = bars[0].length > 0 ? bars[0][bars[0].length - 1] : chordsWithPos[0].label;
+    for (let b = 0; b < bars.length; b++) {
+        if (bars[b].length === 0) {
+            bars[b].push(lastChord);
+        } else {
+            lastChord = bars[b][bars[b].length - 1];
+        }
+    }
+    
+    // Formater: akkorder i samme takt adskilles med mellemrum, takter adskilles med |
+    return bars.map(bar => bar.join(' ')).join(' | ');
 }
 
 
 function formatChordTextPair(chordLine, lyricLine) {
     let formattedLine = '';
-    let chordMatches = [];
-    // Regex der matcher akkorder inkl. m7, add-typer, og et valgfrit komma
+    let startCoords = 0;
+    let trailingChordCount = 0;
+
+    // Regex to find chords
     let regex = new RegExp(`(${chordPattern},?)`, 'g');
     let match;
-    
+    let matches = [];
     while ((match = regex.exec(chordLine)) !== null) {
-        chordMatches.push({ index: match.index, chord: match[0] });
+        matches.push(match);
     }
-    
-    let lastIndex = 0;
-    let spaceOffset = 0; // Ekstra forskydning for korrekt placering
-    let chordsAfterCount = 0; // Tæller akkorder efter lyricLine
-    
-    for (let i = 0; i < chordMatches.length; i++) {
-        let { index, chord } = chordMatches[i];
-        let spacesBefore = (chordLine.substring(lastIndex, index).match(/ /g) || []).length;
-        let insertPos = lastIndex + spacesBefore + spaceOffset;
-        if (insertPos > lyricLine.length) insertPos = lyricLine.length;
-        
-        if (insertPos === lyricLine.length) {
-            // Akkorden skal indsættes efter lyricLine
-            formattedLine += lyricLine.substring(lastIndex, insertPos);
-            // Hvis det ikke er den første akkord efter teksten, tilføj taktmarkør inde i chord-elementet
-            if (chordsAfterCount > 0) {
-                formattedLine += `<sup>| ${chord}</sup> `;
-            } else {
-                formattedLine += `<sup class='chord'>${chord}</sup> `;
-            }
-            lastIndex = insertPos;
-            chordsAfterCount++;
-            spaceOffset += chord.length + 3;
-        } else {
-            // Akkorden indsættes midt i lyricLine – nulstil count for akkorder efter teksten
-            chordsAfterCount = 0;
-            // Juster indsætningspunktet, hvis det falder midt i et ord
-            if (insertPos > 0 && insertPos < lyricLine.length &&
-                lyricLine[insertPos - 1] !== ' ' && lyricLine[insertPos] !== ' ') {
-                let leftPos = insertPos;
-                while (leftPos > 0 && lyricLine[leftPos - 1] !== ' ') {
-                    leftPos--;
+
+    if (matches.length === 0) return lyricLine;
+
+    for (let i = 0; i < matches.length; i++) {
+        let match = matches[i];
+        let chord = match[0];
+        let chordIndex = match.index;
+
+        // Use absolute index from chord line
+        let insertPos = chordIndex;
+
+        // "Intelligent" adjustments:
+        // 1. If the chord lands on a space, try to snap it to the start of the next word 
+        if (insertPos < lyricLine.length && lyricLine[insertPos] === ' ') {
+            let nextWordIdx = -1;
+            for(let k = insertPos; k < lyricLine.length; k++){
+                if(lyricLine[k] !== ' '){
+                    nextWordIdx = k;
+                    break;
                 }
-                let rightPos = insertPos;
-                while (rightPos < lyricLine.length && lyricLine[rightPos] !== ' ') {
-                    rightPos++;
-                }
-                let distLeft = insertPos - leftPos;
-                let distRight = rightPos - insertPos;
-                insertPos = (distLeft <= distRight) ? leftPos : rightPos;
             }
-            let padding = (formattedLine.endsWith('</sup>') ? ' ' : '');
-            formattedLine += lyricLine.substring(lastIndex, insertPos) + padding + `<sup>${chord}</sup> `;
-            lastIndex = insertPos;
-            spaceOffset += chord.length + 3;
+            // If next word is reasonably close (e.g. within 5 chars), snap to it.
+            if(nextWordIdx !== -1 && (nextWordIdx - insertPos) < 5) {
+                insertPos = nextWordIdx;
+            }
         }
+        
+        // 2. If the chord lands INSIDE a short word (likely a single syllable), snap to start.
+        if (insertPos > 0 && insertPos < lyricLine.length && 
+            lyricLine[insertPos] !== ' ' && lyricLine[insertPos-1] !== ' ') {
+             
+             let wStart = insertPos;
+             while(wStart > 0 && lyricLine[wStart-1] !== ' ') {
+                 wStart--;
+             }
+             let wEnd = insertPos;
+             while(wEnd < lyricLine.length && lyricLine[wEnd] !== ' ') {
+                 wEnd++;
+             }
+             
+             // If word is short (e.g. <= 6 chars), snap to start
+             if ((wEnd - wStart) <= 6) {
+                 insertPos = wStart;
+             }
+        }
+        
+        // If we picked an insertion point earlier than processed text, clamp it
+        if (insertPos < startCoords) insertPos = startCoords;
+
+        if (insertPos >= lyricLine.length) {
+            // Finalize text if not done
+            if(startCoords < lyricLine.length){
+                formattedLine += lyricLine.substring(startCoords);
+                startCoords = lyricLine.length;
+            }
+            
+            // Format trailing chords
+            if (trailingChordCount > 0) {
+                 formattedLine += `<sup>| ${chord}</sup> `;
+            } else {
+                 let padding = (formattedLine.length > 0 && !formattedLine.endsWith(' ')) ? ' ' : '';
+                 formattedLine += padding + `<sup class='chord'>${chord}</sup> `;
+            }
+            trailingChordCount++;
+            continue;
+        }
+
+        // Insert text up to chord position
+        if (insertPos > startCoords) {
+             formattedLine += lyricLine.substring(startCoords, insertPos);
+        }
+        
+        // Insert chord
+        formattedLine += `<sup class='chord'>${chord}</sup>`;
+        startCoords = insertPos;
+    }
+
+    // Append remaining text
+    if (startCoords < lyricLine.length) {
+        formattedLine += lyricLine.substring(startCoords);
     }
     
-    formattedLine += lyricLine.substring(lastIndex);
     return formattedLine;
 }
 
@@ -227,26 +310,23 @@ function shiftPage(num) {
 
 
 function copyToClipboard(outputDiv, button) {
-    // Generate a temporary table for copying to preserve layout
+    // Generate simple two-column layout (no table) for easy editing in Google Docs
     let lyricsCells = outputDiv.elt.querySelectorAll('.lyrics-cell');
     let rhythmCells = outputDiv.elt.querySelectorAll('.rhythm-cell');
     
-    // Explicitly zero out border spacing and collapse borders
-    // Try forcing width via HTML attribute and minimal CSS width to encourage shrink-to-fit behavior
-    let tableHTML = '<table width="1" cellpadding="0" cellspacing="0" style="width: auto; border-collapse: collapse; border-spacing: 0; border: none; font-family: sans-serif;">';
+    // Use a full-width borderless table — only way to get right-alignment in Google Docs
+    let tableHTML = '<table style="width: 100%; border: none; border-collapse: collapse; font-family: sans-serif;">';
     
     for(let i = 0; i < lyricsCells.length; i++) {
         let lContent = lyricsCells[i].innerHTML;
         let rContent = rhythmCells[i] ? rhythmCells[i].innerHTML : '';
         
-        // Make sup tags compact to avoid expanding line height but keep font size normal
+        // Make sup tags compact
         lContent = lContent.replace(/<sup/g, '<sup style="line-height: 0; vertical-align: super;"');
 
         tableHTML += '<tr>';
-        // Left column: Lyrics and chords. width: 1% forces cell to shrink to content width
-        tableHTML += `<td style="width: 1%; vertical-align: bottom; padding: 0; line-height: 1; border: none; white-space: nowrap;">${lContent}</td>`;
-        // Right column: Bass rhythm. width: 1% forces cell to shrink to content width
-        tableHTML += `<td style="width: 1%; vertical-align: bottom; text-align: right; line-height: 1; white-space: nowrap; padding: 0; border: none;">${rContent}</td>`;
+        tableHTML += `<td style="border: none; padding: 0; white-space: nowrap;">${lContent}</td>`;
+        tableHTML += `<td style="border: none; padding: 0; text-align: right; white-space: nowrap; width: 1px;">${rContent}</td>`;
         tableHTML += '</tr>';
     }
     tableHTML += '</table>';
@@ -315,6 +395,13 @@ function isSectionHeader(line) {
            l.includes('c-stykke') ||
            l.includes('intro') ||
            l.includes('outro');
+}
+
+function isPipeChordLine(line) {
+    // Matches lines like "| G# | G# | D# | D# |" — pipes with chords only
+    let stripped = line.replace(/\|/g, '').trim();
+    if (!stripped) return false;
+    return line.includes('|') && new RegExp(`^${chordPattern}(\\s+${chordPattern})*$`).test(stripped);
 }
 
 function formatSectionHeader(text) {
