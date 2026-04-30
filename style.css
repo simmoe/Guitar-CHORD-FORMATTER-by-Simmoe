@@ -8,6 +8,11 @@
     font-family:Oxygen;
 }
 
+html, body {
+    height: 100vh;
+    overflow: hidden;
+}
+
 .page{
     position:fixed;
     top:0;
@@ -15,9 +20,52 @@
     width:100vw;
     height: 100vh;
     overflow:hidden;
-    display:grid;
-    place-items:center;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:flex-start;
+    padding: 1vh 2vw;
+    gap: 0.75em;
     transition: 0.3s 0.3s all ease-in-out;
+}
+
+.page h2 {
+    margin: 0;
+    flex: 0 0 auto;
+}
+
+.page .hint {
+    flex: 0 0 auto;
+    font-size: 13px;
+    font-style: italic;
+    color: #444;
+    background: rgba(255, 255, 255, 0.55);
+    padding: 4px 8px;
+    border-radius: 4px;
+    width: 90vw;
+    max-width: 1100px;
+}
+
+.page .row {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.75em;
+    flex-wrap: wrap;
+    width: 90vw;
+    max-width: 1100px;
+    justify-content: flex-start;
+}
+
+.page .row label {
+    margin: 0;
+}
+
+.page .row select,
+.page .row input,
+.page .row button {
+    margin: 0;
+    height: 36px;
 }
 
 .visible{
@@ -33,16 +81,111 @@
 .chord-grid{
     width:100%;
     display:grid;
-    grid-template-columns: 1fr 1fr;
-
+    grid-template-columns: 1fr auto;
+    column-gap: 1.5em;
+    row-gap: 0;
+    line-height: 1.25;
+    font-family: Oxygen, Arial, sans-serif;
+    font-size: 15px;
+    tab-size: 4;
 }
+
+.chord-grid .lyrics-cell,
+.chord-grid .rhythm-cell,
+.chord-grid .chord-line {
+    padding: 0;
+    margin: 0;
+    white-space: pre;
+}
+
+/* Standalone chord rows and the right-hand rhythm/bass column need fixed-width
+   columns so chord positions line up. Lyrics text stays Oxygen for readability. */
+.chord-grid .chord-line,
+.chord-grid .rhythm-cell {
+    font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+    font-size: 14px;
+}
+
+.chord-grid .chord-line {
+    color: #1a4fc7;
+    font-weight: 600;
+}
+
+/* Make lyrics bold so they remain distinguishable from chord lines when
+   pasted into Google Docs / Word / e-mail (where color often gets stripped). */
+.chord-grid .lyrics-cell {
+    font-weight: 700;
+}
+
+.chord-grid .rhythm-cell {
+    text-align: right;
+    white-space: nowrap;
+    color: #444;
+    font-variant-numeric: tabular-nums;
+}
+
+.chord-grid .bar-sep {
+    cursor: pointer;
+    user-select: none;
+    border-radius: 3px;
+    padding: 0 1px;
+    transition: background-color 0.12s ease, outline-color 0.12s ease;
+}
+
+.chord-grid .bar-sep[data-type="bar"] {
+    color: #1a4fc7;
+    font-weight: 700;
+}
+
+.chord-grid .bar-sep:hover {
+    background-color: #fff0a8;
+    outline: 1px solid #e6c200;
+}
+
+.chord-grid .bar-sep[data-type="space"]:hover::before {
+    content: "|";
+    color: #b48a00;
+    font-weight: 700;
+    opacity: 0.55;
+    margin: 0 -0.05em;
+}
+
+.chord-grid .bar-sep[data-type="bar"]:hover {
+    background-color: #ffd2d2;
+    outline-color: #c97474;
+}
+
+.chord-grid .section-header-cell {
+    grid-column: 1 / -1;
+    margin: 0.5em 0 0.25em 0;
+}
+
+.chord-grid sup,
+.chord-grid sup.chord {
+    line-height: 0;
+    vertical-align: super;
+    font-size: 0.75em;
+}
+
 .chord {
     vertical-align: super;
 }
 
 #inputArea, #outputDiv{
-  width:80vw;
-  height:80vh;
+  width: 90vw;
+  max-width: 1100px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#inputArea {
+    resize: none;
+    padding: 0.75em;
+    font-family: Oxygen, monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    border: 1px solid #ccc;
+    border-radius: 4px;
 }
 
 .scrollable {

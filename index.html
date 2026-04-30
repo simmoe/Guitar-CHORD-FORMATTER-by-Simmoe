@@ -15,14 +15,18 @@
     <main>
     <div id="page1" class="page visible">
         <h2>Indsæt sangtekst</h2>
-        <textarea id="inputArea">
-        </textarea>
-        <div class="row" style="align-items: center; gap: 1em;">
+        <textarea id="inputArea" placeholder="Indsæt dine akkorder og sangtekst her..."></textarea>
+        <div class="row">
           <label for="barsPerLine">Takter pr. linje:</label>
           <select id="barsPerLine">
             <option value="2">2</option>
             <option value="4" selected>4</option>
             <option value="8">8</option>
+          </select>
+          <label for="pipeChordMode">Akkord-layout:</label>
+          <select id="pipeChordMode">
+            <option value="inline">Inline i tekst</option>
+            <option value="separate" selected>Egen linje</option>
           </select>
           <button id="formatButton">Formatér sangtekst</button>
         </div>
@@ -30,6 +34,7 @@
 
     <div id="page2" class="page">
         <h2>Formateret sangtekst</h2>
+        <div class="hint">Tip: Klik på <b style="color:#1a4fc7;">|</b> eller mellemrum i takt-kolonnen til højre for at indsætte eller fjerne taktstreger.</div>
         <div id="outputDiv" style="white-space: pre-wrap;" class="scrollable"></div>
         <div class="row">
           <button id="backButton">Tilbage</button>

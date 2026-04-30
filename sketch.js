@@ -61,6 +61,11 @@ function formatLyrics(inputArea, outputDiv) {
     let gridItems = []
 
     let p = 'not-chords'
+    // When we render a chord-only line in "separate" mode and a lyric line
+    // follows, we stash the rhythm/bass tabs here and attach them to the
+    // lyric row instead — that way the bass tabs visually line up with the
+    // sung text rather than with the chord row above it.
+    let pendingRhythm = ''
 
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i]
@@ -74,36 +79,52 @@ function formatLyrics(inputArea, outputDiv) {
         }
         else if(isSectionHeader(line)){
             // Replace brackets and trim
-            let cleanLine = line.replace(/[\[\]]/g, '').trim(); 
-            lyricsCell = formatSectionHeader(cleanLine)
-            rhythmCell = lyricsCell // Repeat logic for right side as well
+            let cleanLine = line.replace(/[\[\]]/g, '').trim();
+            gridItems.push(`<div class="section-header-cell">${formatSectionHeader(cleanLine)}</div>`)
             p = 'not-chords'
+            continue
         }
-        else if (isPipeChordLine(line)) {
-            // Check if the next non-empty line is lyrics (not chords, not header)
+        else if (isPipeChordLine(line) || new RegExp(`^${chordPattern},?(\\s+${chordPattern},?)*$`).test(line.trim())) {
+            // Any chord-only line (pipe bar notation OR space-separated positional chords)
             let nextIdx = i + 1;
             while (nextIdx < lines.length && lines[nextIdx].trim() === '') nextIdx++;
             let nextLine = nextIdx < lines.length ? lines[nextIdx] : '';
-            let nextIsLyrics = nextLine.trim() !== '' 
-                && !isSectionHeader(nextLine) 
+            let nextIsLyrics = nextLine.trim() !== ''
+                && !isSectionHeader(nextLine)
                 && !isPipeChordLine(nextLine)
                 && !new RegExp(`^${chordPattern},?(\\s+${chordPattern},?)*$`).test(nextLine.trim());
-            
-            if (nextIsLyrics) {
+
+            let chordModeEl = select('#pipeChordMode');
+            let chordMode = chordModeEl ? chordModeEl.value() : 'separate';
+
+            if (nextIsLyrics && chordMode === 'inline') {
                 // Treat as chord line for the upcoming lyric line
                 p = 'chords'
                 continue
             } else {
-                // Standalone pipe chord line (e.g. intro)
-                lyricsCell = line.trim()
-                rhythmCell = extractRhythmPattern(line)
+                // Preserve original spacing so chord positions line up with the lyric below (monospace).
+                lyricsCell = `<span class="chord-line">${escapeHtml(line.replace(/\s+$/, ''))}</span>`
+                // Show bar/rhythm column for all chord lines. Pipe notation is exact;
+                // positional notation is best-effort (uses next lyric line as reference when available).
+                let refLine = line;
+                if (!line.includes('|')) {
+                    // Use the longer of chord line and the following lyric line as reference,
+                    // so trailing chords don't all get squeezed into the last bar.
+                    let lyricRef = nextIsLyrics ? nextLine : '';
+                    if (lyricRef.length > refLine.length) refLine = lyricRef;
+                }
+                let rhythm = extractRhythmPattern(line, refLine)
+                if (nextIsLyrics) {
+                    // Defer to the lyric row so the bass tabs align with the sung text.
+                    pendingRhythm = rhythm
+                    rhythmCell = ''
+                } else {
+                    // No lyric follows; attach to the chord row itself.
+                    rhythmCell = rhythm
+                }
                 p = 'not-chords'
             }
         }
-        else if (new RegExp(`^${chordPattern},?(\\s+${chordPattern},?)*$`).test(line.trim())) {
-            p = 'chords'
-            continue
-        } 
         else if (line.trim() != '') {
             if(p == 'chords'){
                 lyricsCell = formatChordTextPair(lines[i-1], line)
@@ -111,7 +132,8 @@ function formatLyrics(inputArea, outputDiv) {
                 p = "not-chords"
             } else {
                 lyricsCell = line
-                rhythmCell = ''
+                rhythmCell = pendingRhythm
+                pendingRhythm = ''
             }
         } 
         else {
@@ -128,46 +150,119 @@ function formatLyrics(inputArea, outputDiv) {
     
     let htmlOutput = `<div class="chord-grid">${gridItems.join('')}</div>`
     outputDiv.html(htmlOutput);
+
+    attachBarSepToggleHandler(outputDiv);
 }
 
-function extractRhythmPattern(chordLine) {
-    let chordsWithPos = [];
-    let regex = new RegExp(`(${chordPattern})`, 'g');
-    let match;
-    
-    while ((match = regex.exec(chordLine)) !== null) {
-        let fullChord = match[0];
-        let tone = fullChord;
-        
-        // Find bastone eller rod
-        if (fullChord.includes('/')) {
-                tone = fullChord.split('/')[1];
+// After the grid has been rendered, attach a single delegated click listener
+// on the chord-grid that toggles a separator between " " and " | ".
+// We stop propagation so it doesn't trigger the outputDiv full-screen toggle.
+function attachBarSepToggleHandler(outputDiv) {
+    const grid = outputDiv.elt.querySelector('.chord-grid');
+    if (!grid) return;
+    grid.addEventListener('click', (e) => {
+        const sep = e.target.closest && e.target.closest('.bar-sep');
+        if (!sep || !grid.contains(sep)) return;
+        e.stopPropagation();
+        const cur = sep.getAttribute('data-type');
+        if (cur === 'bar') {
+            sep.setAttribute('data-type', 'space');
+            sep.textContent = ' ';
+            sep.setAttribute('title', 'Klik for at indsætte taktstreg');
         } else {
-                let rootMatch = fullChord.match(/^[A-G][#b]?/);
-                if (rootMatch) tone = rootMatch[0];
+            sep.setAttribute('data-type', 'bar');
+            sep.textContent = ' | ';
+            sep.setAttribute('title', 'Klik for at fjerne taktstreg');
         }
-        let label = `<b style="display:inline-block;min-width:2em;text-align:center;">${tone}</b>`;
-        chordsWithPos.push({ label, pos: match.index });
+    });
+}
+
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function extractRhythmPattern(chordLine, referenceLine) {
+    let chordRegex = new RegExp(`(${chordPattern})`, 'g');
+
+    function chordToLabel(fullChord) {
+        let tone = fullChord;
+        if (fullChord.includes('/')) {
+            tone = fullChord.split('/')[1];
+        } else {
+            let rootMatch = fullChord.match(/^[A-G][#b]?/);
+            if (rootMatch) tone = rootMatch[0];
+        }
+        return `<b style="display:inline-block;min-width:2em;text-align:center;">${tone}</b>`;
     }
-    
+
+    // If the line uses pipe bar-notation, trust it: split by | and treat each
+    // non-empty segment as its own bar.
+    if (chordLine.includes('|')) {
+        let segments = chordLine.split('|').map(s => s.trim()).filter(s => s.length > 0);
+        if (segments.length > 0) {
+            let bars = segments.map(seg => {
+                let labels = [];
+                let m;
+                chordRegex.lastIndex = 0;
+                while ((m = chordRegex.exec(seg)) !== null) {
+                    labels.push(chordToLabel(m[0]));
+                }
+                return labels;
+            });
+            let lastChord = null;
+            for (let b = 0; b < bars.length; b++) {
+                if (bars[b].length === 0 && lastChord) {
+                    bars[b].push(lastChord);
+                } else if (bars[b].length > 0) {
+                    lastChord = bars[b][bars[b].length - 1];
+                }
+            }
+            return renderBarsWithToggleableSeparators(bars);
+        }
+    }
+
+    // Otherwise, fall back to positional inference.
+    let chordsWithPos = [];
+    let match;
+    chordRegex.lastIndex = 0;
+    while ((match = chordRegex.exec(chordLine)) !== null) {
+        chordsWithPos.push({ label: chordToLabel(match[0]), pos: match.index });
+    }
+
     if (chordsWithPos.length === 0) return '';
-    
+
     let barsPerLine = parseInt(select('#barsPerLine').value()) || 4;
-    
-    // Fordel akkorder i takter baseret på deres position i linjen
-    let lineLen = Math.max(chordLine.length, 1);
+
+    // Figure out a sensible total bar span. The chord line often has trailing
+    // chords squeezed toward the right. Using just chord-line length makes
+    // clustered trailing chords all collapse into the last bar.
+    //
+    // Heuristic: use max(chord line length, lyric line length, last_chord_pos + avg_gap)
+    // so trailing clusters get room to breathe across a couple of bars.
+    let refLen = referenceLine ? referenceLine.length : 0;
+
+    let lastPos = chordsWithPos[chordsWithPos.length - 1].pos;
+    let gaps = [];
+    for (let g = 1; g < chordsWithPos.length; g++) {
+        gaps.push(chordsWithPos[g].pos - chordsWithPos[g - 1].pos);
+    }
+    let avgGap = gaps.length > 0 ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
+    let positionalLen = lastPos + Math.max(avgGap, 3);
+
+    let lineLen = Math.max(chordLine.length, refLen, positionalLen, 1);
     let barWidth = lineLen / barsPerLine;
-    
-    // Opret takter (bars) som arrays
+
     let bars = [];
     for (let b = 0; b < barsPerLine; b++) bars.push([]);
-    
+
     for (let c of chordsWithPos) {
         let barIndex = Math.min(Math.floor(c.pos / barWidth), barsPerLine - 1);
         bars[barIndex].push(c.label);
     }
-    
-    // Fyld tomme takter med den senest kendte akkord
+
     let lastChord = bars[0].length > 0 ? bars[0][bars[0].length - 1] : chordsWithPos[0].label;
     for (let b = 0; b < bars.length; b++) {
         if (bars[b].length === 0) {
@@ -176,9 +271,32 @@ function extractRhythmPattern(chordLine) {
             lastChord = bars[b][bars[b].length - 1];
         }
     }
-    
-    // Formater: akkorder i samme takt adskilles med mellemrum, takter adskilles med |
-    return bars.map(bar => bar.join(' ')).join(' | ');
+
+    return renderBarsWithToggleableSeparators(bars);
+}
+
+// Renders an array of bars (each a list of chord-label HTML strings) into a
+// single HTML string where every separator between two chord labels is wrapped
+// in a clickable <span class="bar-sep"> the user can toggle between a plain
+// space and a bar line ("|"). This lets the algorithm provide a best guess
+// while still letting the user fine-tune bar boundaries by clicking.
+function renderBarsWithToggleableSeparators(bars) {
+    let out = '';
+    for (let b = 0; b < bars.length; b++) {
+        for (let c = 0; c < bars[b].length; c++) {
+            out += bars[b][c];
+            const isLastInBar = (c === bars[b].length - 1);
+            const isLastBar = (b === bars.length - 1);
+            if (isLastInBar) {
+                if (!isLastBar) {
+                    out += '<span class="bar-sep" data-type="bar" title="Klik for at fjerne taktstreg"> | </span>';
+                }
+            } else {
+                out += '<span class="bar-sep" data-type="space" title="Klik for at indsætte taktstreg"> </span>';
+            }
+        }
+    }
+    return out;
 }
 
 
@@ -310,24 +428,36 @@ function shiftPage(num) {
 
 
 function copyToClipboard(outputDiv, button) {
-    // Generate simple two-column layout (no table) for easy editing in Google Docs
-    let lyricsCells = outputDiv.elt.querySelectorAll('.lyrics-cell');
-    let rhythmCells = outputDiv.elt.querySelectorAll('.rhythm-cell');
-    
-    // Use a full-width borderless table — only way to get right-alignment in Google Docs
-    let tableHTML = '<table style="width: 100%; border: none; border-collapse: collapse; font-family: sans-serif;">';
-    
-    for(let i = 0; i < lyricsCells.length; i++) {
-        let lContent = lyricsCells[i].innerHTML;
-        let rContent = rhythmCells[i] ? rhythmCells[i].innerHTML : '';
-        
-        // Make sup tags compact
-        lContent = lContent.replace(/<sup/g, '<sup style="line-height: 0; vertical-align: super;"');
+    // Walk grid children in order; pair lyrics+rhythm cells, let section headers span both columns.
+    let grid = outputDiv.elt.querySelector('.chord-grid');
+    let tableHTML = '<table style="width: 100%; border: none; border-collapse: collapse; font-family: Consolas, Menlo, \'Courier New\', monospace; white-space: pre;">';
 
-        tableHTML += '<tr>';
-        tableHTML += `<td style="border: none; padding: 0; white-space: nowrap;">${lContent}</td>`;
-        tableHTML += `<td style="border: none; padding: 0; text-align: right; white-space: nowrap; width: 1px;">${rContent}</td>`;
-        tableHTML += '</tr>';
+    if (grid) {
+        let children = Array.from(grid.children);
+        for (let i = 0; i < children.length; i++) {
+            let el = children[i];
+            if (el.classList.contains('section-header-cell')) {
+                let content = el.innerHTML;
+                tableHTML += '<tr>';
+                tableHTML += `<td colspan="2" style="border: none; padding: 0;">${content}</td>`;
+                tableHTML += '</tr>';
+            } else if (el.classList.contains('lyrics-cell')) {
+                let lContent = el.innerHTML;
+                let rEl = children[i + 1];
+                let rContent = (rEl && rEl.classList.contains('rhythm-cell')) ? rEl.innerHTML : '';
+                if (rEl && rEl.classList.contains('rhythm-cell')) i++;
+                // Unwrap clickable bar-sep spans so the pasted output isn't
+                // littered with span markup; keep only their text content.
+                rContent = rContent.replace(/<span class="bar-sep"[^>]*>([\s\S]*?)<\/span>/g, '$1');
+
+                lContent = lContent.replace(/<sup/g, '<sup style="line-height: 0; vertical-align: super;"');
+
+                tableHTML += '<tr>';
+                tableHTML += `<td style="border: none; padding: 0; white-space: nowrap;">${lContent}</td>`;
+                tableHTML += `<td style="border: none; padding: 0; text-align: right; white-space: nowrap; width: 1px;">${rContent}</td>`;
+                tableHTML += '</tr>';
+            }
+        }
     }
     tableHTML += '</table>';
 
