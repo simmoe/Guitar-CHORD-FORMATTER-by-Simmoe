@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: is the user signed in?
+    function signedIn() { return request.auth != null; }
+
+    // Helper: is this user a teacher (read-only access to all mat_teacher data)?
+    function isTeacher() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/mat_teacher_users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/mat_teacher_users/$(request.auth.uid)).data.role == 'teacher';
+    }
+
+    // User profile docs
+    match /mat_teacher_users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isTeacher());
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow update: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role == resource.data.role; // role can't self-promote
+    }
+
+    // Assignments
+    match /mat_teacher_assignments/{aid} {
+      allow read: if signedIn()
+                  && (resource.data.ownerUid == request.auth.uid || isTeacher());
+      allow create: if signedIn()
+                    && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if signedIn()
+                    && resource.data.ownerUid == request.auth.uid;
+      // Sletning sker via Cloud Function (admin) — recursiveDelete + evt. fremtidige bilagsfiler
+      allow delete: if false;
+
+      // Steps subcollection
+      match /steps/{sid} {
+        allow read: if signedIn()
+                    && (get(/databases/$(database)/documents/mat_teacher_assignments/$(aid)).data.ownerUid == request.auth.uid
+                        || isTeacher());
+        // Only Cloud Functions (admin SDK) write steps
+        allow write: if false;
+      }
+
+      // Feedback subcollection
+      match /feedback/{fid} {
+        allow read: if signedIn()
+                    && (get(/databases/$(database)/documents/mat_teacher_assignments/$(aid)).data.ownerUid == request.auth.uid
+                        || isTeacher());
+        allow write: if false;
+      }
+    }
+
+    // NEXT AI Design Hub — public markdown documents shown on aihub-application.
+    // Read is public so anyone can view the proposal site.
+    // Write is restricted to the designated editors (verified Google accounts).
+    function isAihubEditor() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in [
+          'simmoe@gmail.com',
+          'mrnm@aarhustech.dk'
+        ];
+    }
+
+    match /documents/{docId} {
+      allow read: if true;
+      allow write: if isAihubEditor();
+    }
+
+    // ================================================================
+    // Fællesbandet / chord-formatter
+    // Tilføjet 2026-05-01. Bandets medlemmer ligger i
+    // chord_bands/{bandId}.memberUids og styres derfra.
+    // ================================================================
+
+    function isChordBandMember(bandId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/chord_bands/$(bandId))
+        && request.auth.uid in get(/databases/$(database)/documents/chord_bands/$(bandId)).data.memberUids;
+    }
+
+    // User-profil-doc'er (oprettet ved første login eller via bootstrap-script).
+    match /chord_users/{uid} {
+      allow read:   if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow update: if signedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // Band-dokumentet. Læses af alle medlemmer; opdateres kun af owner
+    // (typisk via bootstrap-script, ikke direkte fra UI'et).
+    match /chord_bands/{bandId} {
+      allow read:   if isChordBandMember(bandId);
+      allow update: if signedIn()
+                    && resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow create: if false; // opret via Admin SDK
+      allow delete: if false;
+
+      // Sangbog
+      match /songs/{songId} {
+        allow read, write: if isChordBandMember(bandId);
+      }
+
+      // Sætlister
+      match /setlists/{setlistId} {
+        allow read, write: if isChordBandMember(bandId);
+      }
+    }
+  }
+}

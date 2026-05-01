@@ -15,7 +15,8 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"deploy": "npm run build && firebase deploy --only hosting,functions",
 		"deploy:fns": "firebase deploy --only functions",
-		"deploy:web": "npm run build && firebase deploy --only hosting"
+		"deploy:web": "npm run build && firebase deploy --only hosting",
+		"bootstrap:band": "node scripts/bootstrap-band.mjs"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.8",
@@ -24,6 +25,8 @@
 		"@tailwindcss/vite": "^4.0.0",
 		"autoprefixer": "^10.4.20",
 		"concurrently": "^9.1.0",
+		"firebase-admin": "^13.8.0",
+		"google-auth-library": "^10.6.2",
 		"svelte": "^5.20.0",
 		"svelte-check": "^4.1.1",
 		"tailwindcss": "^4.0.0",

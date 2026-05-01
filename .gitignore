@@ -8,6 +8,8 @@ dist/
 !.env.example
 .firebase/
 .firebaserc.local
+secrets/
+scripts/.live-*
 *.log
 .vscode/
 .idea/

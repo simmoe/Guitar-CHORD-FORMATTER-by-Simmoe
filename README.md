@@ -34,7 +34,24 @@ chord_bands/{bandId}                    — band-doc med memberUids
 
 ## Firestore Rules — VIGTIGT
 
-`firestore.rules` deles med mat-teacher og AI Hub. **Ros til [`firestore-rules-safety`](~/.cursor/skills/firestore-rules-safety/SKILL.md)** — pull live rules, merge ind, vis diff, godkend, deploy. Vores tilføjelser ligger i [`firestore.rules.additions`](./firestore.rules.additions) som reference.
+`firestore.rules` deles med mat-teacher og AI Hub i samme Firebase-projekt. Filen i repoet er fuld merged version (alle tre apps' blokke). **Følg [`firestore-rules-safety`](~/.cursor/skills/firestore-rules-safety/SKILL.md)** før hver `firebase deploy --only firestore:rules`:
+
+```bash
+node scripts/fetch-live-rules.mjs   # henter live rules → scripts/.live-firestore.rules.txt (gitignored)
+diff scripts/.live-firestore.rules.txt firestore.rules
+# Hvis kun vores chord_*-blokke skiller sig ud → safe at deploye
+firebase deploy --only firestore:rules --project p5-firebase-eebc1
+```
+
+## Bootstrap af bandet
+
+Engangs-script der opretter `chord_bands/faellesbandet`-dokumentet med UID'er slået op fra Firebase Auth:
+
+```bash
+npm run bootstrap:band
+```
+
+Forudsætter `secrets/firebase-adminsdk.json` (symlink eller kopi af mat-teacher's service account — det er samme Firebase-projekt). Idempotent: kan køres igen når nye medlemmer er tilføjet i `src/lib/data/band.ts`.
 
 ## Legacy
 
