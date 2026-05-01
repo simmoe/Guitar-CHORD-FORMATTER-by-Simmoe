@@ -1,5 +1,6 @@
 import {
 	onAuthStateChanged,
+	signInWithEmailAndPassword,
 	signInWithPopup,
 	GoogleAuthProvider,
 	signOut as fbSignOut,
@@ -58,10 +59,14 @@ class AuthState {
 		this.profile = fresh.data() as UserDoc;
 	}
 
+	async loginEmail(email: string, password: string) {
+		const auth = getFirebaseAuth();
+		await signInWithEmailAndPassword(auth, email, password);
+	}
+
 	async loginGoogle() {
 		const auth = getFirebaseAuth();
 		const provider = new GoogleAuthProvider();
-		provider.setCustomParameters({ prompt: 'select_account' });
 		await signInWithPopup(auth, provider);
 	}
 

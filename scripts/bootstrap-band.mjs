@@ -1,5 +1,5 @@
 /**
- * Engangs-bootstrap: opret band-dokumentet i Firestore.
+ * Engangs-bootstrap: opret band-dokumentet i Firestore + sæt initial passwords.
  *
  * Bruger Firebase Admin SDK (omgår client security rules) til at oprette
  * `chord_bands/faellesbandet` med ownerUid + memberUids udfyldt fra Auth.
@@ -7,17 +7,18 @@
  * Forudsætninger:
  *  - secrets/firebase-adminsdk.json er på plads (symlink til mat-teacher's
  *    service account er fint — det er samme Firebase-projekt)
- *  - Hvert band-medlem skal allerede være oprettet som Firebase Auth-bruger
- *    (de har som regel logget ind på en anden app i samme projekt før, fx
- *    mat-teacher). Hvis ikke, springer scriptet dem over og logger advarslen
- *    — du kan køre scriptet igen efter de første gang har logget ind.
+ *  - Email/Password sign-in metoden er aktiveret i Firebase Console
+ *    (Authentication → Sign-in method → Email/Password)
+ *  - Eksisterende Auth-brugere (fx fra mat-teacher-login) genbruges; nye
+ *    medlemmer oprettes med en initial password.
  *
  * Brug:
- *    node scripts/bootstrap-band.mjs
+ *    node scripts/bootstrap-band.mjs                    # default password
+ *    INIT_PASSWORD="dit-eget-pw" node scripts/...       # custom password
  *
  * Idempotent: scriptet er sikkert at køre flere gange — det sletter ikke
- * eksisterende data, men opdaterer memberUids/memberEmails, så nye
- * medlemmer i src/lib/data/band.ts kommer ind hver gang.
+ * eksisterende data og rører ikke passwords for brugere der allerede er
+ * oprettet (medmindre du sætter FORCE_RESET_PASSWORD=1).
  */
 
 import { readFileSync } from 'node:fs';
@@ -80,32 +81,68 @@ for (const m of meta.members) {
 	console.log(`   · ${m.email}  (${m.displayName}, ${m.role})`);
 }
 
-// Slå hvert medlems UID op i Firebase Auth.
+const initPassword = process.env.INIT_PASSWORD ?? 'faelles';
+const forceResetPassword = process.env.FORCE_RESET_PASSWORD === '1';
+
+console.log(`\n🔑 Initial password: "${initPassword}"`);
+if (forceResetPassword) console.log('   (FORCE_RESET_PASSWORD=1 — alle passwords nulstilles)');
+
+// Slå hvert medlems UID op i Firebase Auth — opret hvis de mangler.
 const memberUids = [];
 const memberEmails = [];
+const passwordChanges = [];
 let ownerUid = null;
 let ownerEmail = null;
 
 for (const member of meta.members) {
+	let userRecord;
+	let isNew = false;
 	try {
-		const userRecord = await auth.getUserByEmail(member.email);
-		memberUids.push(userRecord.uid);
-		memberEmails.push(member.email);
-		if (member.role === 'owner') {
-			ownerUid = userRecord.uid;
-			ownerEmail = member.email;
-		}
-		console.log(`   ✓ ${member.email} → uid ${userRecord.uid}`);
+		userRecord = await auth.getUserByEmail(member.email);
 	} catch (err) {
-		if (err.code === 'auth/user-not-found') {
-			console.warn(
-				`   ⚠ ${member.email} har ikke en Firebase Auth-bruger endnu — ` +
-					`bed dem logge ind én gang og kør scriptet igen.`
-			);
-		} else {
+		if (err.code !== 'auth/user-not-found') {
 			console.error(`   ✗ ${member.email}: ${err.message}`);
+			continue;
+		}
+		// Opret ny Auth-bruger med initial password
+		try {
+			userRecord = await auth.createUser({
+				email: member.email,
+				password: initPassword,
+				displayName: member.displayName,
+				emailVerified: true
+			});
+			isNew = true;
+			passwordChanges.push({ email: member.email, status: 'created' });
+		} catch (createErr) {
+			console.error(`   ✗ Kunne ikke oprette ${member.email}: ${createErr.message}`);
+			continue;
 		}
 	}
+
+	// Hvis bruger findes uden password-provider (fx kun signed in via Google),
+	// tilføj et initial password så de også kan email/password-logge ind.
+	const hasPassword = userRecord.providerData?.some((p) => p.providerId === 'password') ?? false;
+	if (!isNew && (!hasPassword || forceResetPassword)) {
+		try {
+			await auth.updateUser(userRecord.uid, { password: initPassword });
+			passwordChanges.push({
+				email: member.email,
+				status: hasPassword ? 'reset' : 'password-added'
+			});
+		} catch (updErr) {
+			console.error(`   ✗ Kunne ikke sætte password for ${member.email}: ${updErr.message}`);
+		}
+	}
+
+	memberUids.push(userRecord.uid);
+	memberEmails.push(member.email);
+	if (member.role === 'owner') {
+		ownerUid = userRecord.uid;
+		ownerEmail = member.email;
+	}
+	const status = isNew ? '🆕 oprettet' : '✓ findes';
+	console.log(`   ${status} ${member.email} → uid ${userRecord.uid}`);
 }
 
 if (!ownerUid) {
@@ -160,6 +197,14 @@ for (let i = 0; i < memberUids.length; i++) {
 }
 if (userDocsCreated > 0) {
 	console.log(`✅ ${userDocsCreated} bruger-doc(s) oprettet i chord_users/.`);
+}
+
+if (passwordChanges.length > 0) {
+	console.log(`\n📬 Email/password-konti:`);
+	for (const c of passwordChanges) {
+		console.log(`   · ${c.email} — ${c.status} med password "${initPassword}"`);
+	}
+	console.log(`   Bed medlemmer skifte adgangskode efter første login.`);
 }
 
 console.log('\n🎉 Bootstrap færdig.');
