@@ -118,6 +118,117 @@ select {
 	}
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Chord grid — bruges af <ChordDisplay /> til at rendere formaterede sange.
+ * Lyrics: Oxygen + bold (så de stadig stikker ud uden farve i Google Docs).
+ * Chord-line + rhythm: monospace så bass-tabs står lodret pænt.
+ * .bar-sep gør taktstreger klikbare med hover-affordance.
+ * ──────────────────────────────────────────────────────────────────────── */
+.chord-grid {
+	width: 100%;
+	display: grid;
+	grid-template-columns: 1fr auto;
+	column-gap: 1.5em;
+	row-gap: 0;
+	line-height: 1.35;
+	font-family: var(--font-sans);
+	font-size: 16px;
+	tab-size: 4;
+	color: var(--color-ink);
+}
+.chord-grid .lyrics-cell,
+.chord-grid .rhythm-cell,
+.chord-grid .chord-line {
+	padding: 0;
+	margin: 0;
+	white-space: pre;
+}
+.chord-grid .chord-line,
+.chord-grid .rhythm-cell {
+	font-family: var(--font-mono);
+	font-size: 14px;
+}
+.chord-grid .chord-line,
+.chord-grid .bass-chord,
+.chord-grid sup.chord {
+	color: var(--color-chord);
+	font-weight: 600;
+}
+.chord-grid sup.chord {
+	font-size: 0.78em;
+	line-height: 0;
+	margin-right: 0.05em;
+}
+.chord-grid .lyrics-cell {
+	font-weight: 700;
+}
+.chord-grid .section-header-cell {
+	grid-column: 1 / -1;
+	margin: 0.5rem 0 0.25rem;
+}
+.chord-grid .section-header {
+	display: inline-block;
+	padding: 0.15rem 0.6rem;
+	border-radius: 999px;
+	font-size: 0.85rem;
+	font-weight: 700;
+	color: #1f2937;
+	letter-spacing: 0.02em;
+}
+.chord-grid .bar-sep {
+	cursor: pointer;
+	user-select: none;
+	border-radius: 3px;
+	padding: 0 1px;
+	transition: background-color 0.12s ease, outline-color 0.12s ease;
+}
+.chord-grid .bar-sep[data-type='bar'] {
+	color: var(--color-chord);
+	font-weight: 700;
+}
+.chord-grid .bar-sep:hover {
+	background-color: #fff0a8;
+	outline: 1px solid #e6c200;
+}
+.chord-grid .bar-sep[data-type='space']:hover::before {
+	content: '|';
+	color: #b48a00;
+	font-weight: 700;
+	opacity: 0.55;
+	margin: 0 -0.05em;
+}
+.chord-grid .bar-sep[data-type='bar']:hover {
+	background-color: #ffd2d2;
+	outline-color: #c97474;
+}
+
+/* I edit-mode er bar-sep yderligere fremhævet */
+.chord-wrap.edit-mode .bar-sep {
+	background-color: rgba(245, 158, 11, 0.12);
+}
+
+/* Print-styles: brug papir-baggrund og deaktiver interaktivitet */
+@media print {
+	html,
+	body {
+		background: #ffffff !important;
+		color: #000000 !important;
+	}
+	.no-print {
+		display: none !important;
+	}
+	.print-page {
+		page-break-after: always;
+		padding: 1cm 1cm 0;
+	}
+	.print-page:last-child {
+		page-break-after: auto;
+	}
+	.chord-grid .bar-sep {
+		cursor: default;
+	}
+}
+
 @utility btn-ghost {
 	display: inline-flex;
 	align-items: center;

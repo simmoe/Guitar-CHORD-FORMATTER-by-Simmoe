@@ -37,11 +37,18 @@ export interface SongDoc {
 	barsPerLine: 2 | 4 | 8;
 	chordLayout: ChordLayout;
 	barEdits?: BarEdits;
+	/**
+	 * Kategorier (koncert-temaer) som sangen er en del af, fx
+	 * ["Summertime", "Forår", "Julen"]. Frit-tekst og deles på tværs af
+	 * bandets sange — `uniqueCategoriesFromSongs()` udtrækker alle kendte.
+	 */
+	categories?: string[];
 	sourceUrl?: string; // hvis hentet fra Ultimate Guitar
 	notes?: string;
 	createdBy: string;
 	createdAt: Timestamp;
 	updatedAt: Timestamp;
+	updatedBy?: string;
 }
 
 export interface SetlistEntry {
