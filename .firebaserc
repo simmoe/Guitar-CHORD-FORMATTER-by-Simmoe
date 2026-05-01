@@ -1,0 +1,12 @@
+{
+	"projects": {
+		"default": "p5-firebase-eebc1"
+	},
+	"targets": {
+		"p5-firebase-eebc1": {
+			"hosting": {
+				"faellesbandet": ["faellesbandet"]
+			}
+		}
+	}
+}

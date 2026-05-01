@@ -1,0 +1,36 @@
+{
+	"name": "chord-formatter",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"dev:fns": "cd functions && npm run build:watch",
+		"dev:emu": "firebase emulators:start --only functions",
+		"dev:all": "concurrently -n vite,fns,emu -c green,yellow,blue \"npm:dev\" \"npm:dev:fns\" \"npm:dev:emu\"",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"deploy": "npm run build && firebase deploy --only hosting,functions",
+		"deploy:fns": "firebase deploy --only functions",
+		"deploy:web": "npm run build && firebase deploy --only hosting"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-static": "^3.0.8",
+		"@sveltejs/kit": "^2.22.0",
+		"@sveltejs/vite-plugin-svelte": "^5.0.3",
+		"@tailwindcss/vite": "^4.0.0",
+		"autoprefixer": "^10.4.20",
+		"concurrently": "^9.1.0",
+		"svelte": "^5.20.0",
+		"svelte-check": "^4.1.1",
+		"tailwindcss": "^4.0.0",
+		"typescript": "^5.7.0",
+		"vite": "^6.0.7"
+	},
+	"dependencies": {
+		"firebase": "^11.2.0"
+	}
+}
