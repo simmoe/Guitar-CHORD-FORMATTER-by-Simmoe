@@ -77,17 +77,27 @@ select {
 	box-shadow: var(--shadow-soft);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Button system
+ * Tre varianter — alle læsbare på BÅDE den mørke base og hvide kort/dialoger:
+ *   .btn-primary  → fyldt accent-farve (orange) — primær handling
+ *   .btn-secondary → hvid pille m/ ramme + mørk tekst — sekundær handling
+ *   .btn-ghost    → transparent, dæmpet — tertiær/destruktiv (combinér m/ farve)
+ * Modifiers: .btn-sm (kompakt), tilføj utility-tekstfarve for varianter som
+ * "destructive" (fx class="btn-secondary !text-[var(--color-error)]").
+ * ──────────────────────────────────────────────────────────────────────── */
 @utility btn-primary {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	gap: 0.5rem;
-	padding: 0.75rem 1.25rem;
+	padding: 0.7rem 1.2rem;
 	border-radius: var(--radius-button);
 	background: var(--color-accent);
 	color: #ffffff;
 	font-weight: 600;
-	transition: background 120ms ease, transform 120ms ease;
+	font-size: 0.95rem;
+	transition: background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 	&:hover {
 		background: var(--color-accent-hover);
 	}
@@ -105,30 +115,41 @@ select {
 	align-items: center;
 	justify-content: center;
 	gap: 0.5rem;
-	padding: 0.75rem 1.25rem;
+	padding: 0.55rem 1rem;
 	border-radius: var(--radius-button);
-	background: rgba(255, 255, 255, 0.06);
-	border: 1px solid var(--color-border);
-	color: var(--color-ink-on-dark);
-	font-weight: 500;
+	background: #ffffff;
+	border: 1px solid var(--color-border-subtle);
+	color: var(--color-ink);
+	font-weight: 600;
+	font-size: 0.9rem;
 	transition: background 120ms ease, border-color 120ms ease;
 	&:hover {
-		background: rgba(255, 255, 255, 0.1);
-		border-color: var(--color-accent);
+		background: #f3f4f6;
+		border-color: var(--color-ink-faint);
+	}
+	&:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 }
 
+@utility btn-sm {
+	padding: 0.35rem 0.75rem;
+	font-size: 0.82rem;
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
- * Chord grid — bruges af <ChordDisplay /> til at rendere formaterede sange.
- * Lyrics: Oxygen + bold (så de stadig stikker ud uden farve i Google Docs).
- * Chord-line + rhythm: monospace så bass-tabs står lodret pænt.
- * .bar-sep gør taktstreger klikbare med hover-affordance.
+ * Chord grid — bruges af <EditableSong /> (både edit-mode og readOnly mode).
+ * Print-siden bruger samme komponent med `readOnly`, så skærm og print er
+ * pixel-identiske. Lyrics: Oxygen + bold. Akkord/bass: monospace + chord-
+ * farve. Begge sider rendres ens via `renderBarLine` — `|` bliver til
+ * `<span class="bar-sep">|</span>`, akkorder til `<b class="bass-chord">`.
  * ──────────────────────────────────────────────────────────────────────── */
 .chord-grid {
 	width: 100%;
 	display: grid;
-	grid-template-columns: 1fr auto;
-	column-gap: 1.5em;
+	grid-template-columns: minmax(0, 1fr) auto;
+	column-gap: clamp(1.5em, 15vw, 12em);
 	row-gap: 0;
 	line-height: 1.35;
 	font-family: var(--font-sans);
@@ -137,27 +158,22 @@ select {
 	color: var(--color-ink);
 }
 .chord-grid .lyrics-cell,
-.chord-grid .rhythm-cell,
-.chord-grid .chord-line {
+.chord-grid .rhythm-cell {
 	padding: 0;
 	margin: 0;
 	white-space: pre;
 }
-.chord-grid .chord-line,
+.chord-grid .lyrics-cell {
+	min-width: 0;
+}
+.chord-grid .chord-cell,
 .chord-grid .rhythm-cell {
 	font-family: var(--font-mono);
 	font-size: 14px;
 }
-.chord-grid .chord-line,
-.chord-grid .bass-chord,
-.chord-grid sup.chord {
+.chord-grid .bass-chord {
 	color: var(--color-chord);
 	font-weight: 600;
-}
-.chord-grid sup.chord {
-	font-size: 0.78em;
-	line-height: 0;
-	margin-right: 0.05em;
 }
 .chord-grid .lyrics-cell {
 	font-weight: 700;
@@ -166,66 +182,214 @@ select {
 	grid-column: 1 / -1;
 	margin: 0.5rem 0 0.25rem;
 }
+.chord-grid .section-header-cell--collapsed .section-header {
+	opacity: 0.7;
+}
+.chord-grid .section-header-cell--collapsed::after {
+	content: '…';
+	color: #9aa0aa;
+	margin-left: 0.4rem;
+	letter-spacing: 0.15em;
+	font-size: 0.9em;
+}
 .chord-grid .section-header {
 	display: inline-block;
-	padding: 0.15rem 0.6rem;
+	padding: 0.15rem 0.7rem;
 	border-radius: 999px;
 	font-size: 0.85rem;
 	font-weight: 700;
 	color: #1f2937;
-	letter-spacing: 0.02em;
+	background: #eeeeee;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.chord-grid .section-header--intro {
+	background: #e3f2fd;
+	color: #0d47a1;
+}
+.chord-grid .section-header--verse {
+	background: #e8f5e9;
+	color: #1b5e20;
+}
+.chord-grid .section-header--pre-chorus {
+	background: #fff8e1;
+	color: #8d6e00;
+}
+.chord-grid .section-header--chorus {
+	background: #ffebee;
+	color: #b71c1c;
+}
+.chord-grid .section-header--bridge {
+	background: #fff3e0;
+	color: #b3501a;
+}
+.chord-grid .section-header--solo {
+	background: #fff9c4;
+	color: #6c5b00;
+}
+.chord-grid .section-header--interlude {
+	background: #e0f2f1;
+	color: #0d6e63;
+}
+.chord-grid .section-header--outro {
+	background: #ede7f6;
+	color: #4527a0;
+}
+.chord-grid .section-header--coda {
+	background: #efebe9;
+	color: #4e342e;
+}
+.chord-grid .section-header--other {
+	background: #eeeeee;
+	color: #1f2937;
 }
 .chord-grid .bar-sep {
-	cursor: pointer;
-	user-select: none;
-	border-radius: 3px;
-	padding: 0 1px;
-	transition: background-color 0.12s ease, outline-color 0.12s ease;
-}
-.chord-grid .bar-sep[data-type='bar'] {
 	color: var(--color-chord);
 	font-weight: 700;
+	margin: 0 0.15em;
+	user-select: none;
 }
-.chord-grid .bar-sep:hover {
-	background-color: #fff0a8;
-	outline: 1px solid #e6c200;
-}
-.chord-grid .bar-sep[data-type='space']:hover::before {
-	content: '|';
-	color: #b48a00;
-	font-weight: 700;
-	opacity: 0.55;
-	margin: 0 -0.05em;
-}
-.chord-grid .bar-sep[data-type='bar']:hover {
-	background-color: #ffd2d2;
-	outline-color: #c97474;
+.chord-grid .chord-spacer {
+	color: var(--color-ink-faint, #9ca3af);
+	font-weight: 400;
+	user-select: none;
+	letter-spacing: 0.1em;
 }
 
-/* I edit-mode er bar-sep yderligere fremhævet */
-.chord-wrap.edit-mode .bar-sep {
-	background-color: rgba(245, 158, 11, 0.12);
+/* ──────────────────────────────────────────────────────────────────────────
+ * "Uden bass tabs" — global hjælper. Sættes på en wrapper rundt om en
+ * EditableSong (eller flere) for at skjule højre rytme-kolonne både i
+ * skærm-preview og under print. Bruges på både print-siden og enkelt-sang-
+ * siden, så toggle'en kan placeres begge steder uden style-duplication.
+ * ──────────────────────────────────────────────────────────────────────── */
+.no-bass-tabs .rhythm-cell {
+	display: none !important;
+}
+.no-bass-tabs .editable-song.chord-grid {
+	grid-template-columns: 2.6em minmax(0, 1fr) !important;
 }
 
-/* Print-styles: brug papir-baggrund og deaktiver interaktivitet */
+/* ──────────────────────────────────────────────────────────────────────────
+ * Print-styles
+ * Mål: hver sang fylder MAKS én A4-side. Vi skjuler navigation/toolbar og
+ * komprimerer typografi+linjeafstand kraftigt. .song-print-fit klassen kan
+ * sættes runtime hvis vi vil scale-down store sange yderligere.
+ * ──────────────────────────────────────────────────────────────────────── */
+@page {
+	size: A4 portrait;
+	margin: 10mm 12mm;
+}
 @media print {
 	html,
 	body {
 		background: #ffffff !important;
 		color: #000000 !important;
+		font-size: 10pt;
 	}
-	.no-print {
+	.no-print,
+	.no-print-toolbar,
+	header,
+	nav,
+	details.meta-details,
+	a[href='/songbook'] {
 		display: none !important;
 	}
+
+	/* Sangkortet selv: drop card-stilen, brug hele A4'eren */
+	main {
+		max-width: none !important;
+		padding: 0 !important;
+		margin: 0 !important;
+	}
+	.song-card,
+	article.card {
+		box-shadow: none !important;
+		border: none !important;
+		background: transparent !important;
+		padding: 0 !important;
+		margin: 0 !important;
+		page-break-inside: auto;
+	}
+
+	/* Print-header: titel + toneart + kunstner kompakt */
+	.print-header {
+		display: block !important;
+		margin: 0 0 0.35cm;
+		page-break-after: avoid;
+	}
+	.print-header .print-title {
+		font-family: var(--font-display);
+		font-size: 16pt;
+		font-weight: 700;
+		line-height: 1.1;
+		color: #000;
+	}
+	.print-header .print-key {
+		font-family: var(--font-mono);
+		font-size: 11pt;
+		font-weight: 700;
+		color: #000;
+		margin-left: 0.4em;
+	}
+	.print-header .print-artist {
+		font-size: 9pt;
+		font-style: italic;
+		color: #444;
+		margin-top: 0.05cm;
+	}
+
+	/* Chord-grid: kompakt layout, ingen interaktive states */
+	.chord-grid {
+		font-size: 10pt !important;
+		line-height: 1.18 !important;
+		color: #000 !important;
+	}
+	.chord-grid .chord-cell,
+	.chord-grid .rhythm-cell {
+		font-size: 9.5pt !important;
+		color: #000 !important;
+	}
+	.chord-grid .lyrics-cell {
+		font-weight: 700 !important;
+	}
+	.chord-grid .bass-chord,
+	.chord-grid .bar-sep {
+		color: #000 !important;
+	}
+	.chord-grid .section-header-cell {
+		margin: 0.18cm 0 0.06cm !important;
+		page-break-after: avoid;
+	}
+	.chord-grid .section-header {
+		background: #e5e7eb !important;
+		color: #000 !important;
+		font-size: 9.5pt !important;
+		padding: 0.06cm 0.3cm !important;
+		print-color-adjust: exact;
+		-webkit-print-color-adjust: exact;
+	}
+
+	/* Sang-area: ingen ramme, ingen padding */
+	.song-area,
+	.paste-area-wrap {
+		border: none !important;
+		padding: 0 !important;
+		background: transparent !important;
+		min-height: 0 !important;
+	}
+
+	/* Multi-print page-flow */
 	.print-page {
 		page-break-after: always;
-		padding: 1cm 1cm 0;
 	}
 	.print-page:last-child {
 		page-break-after: auto;
 	}
-	.chord-grid .bar-sep {
-		cursor: default;
+
+	/* Hjælpe-linjen "Klik direkte i teksten…" — irrelevant på print */
+	.edit-hint {
+		display: none !important;
 	}
 }
 

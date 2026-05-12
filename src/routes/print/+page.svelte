@@ -4,7 +4,8 @@
 	import { authState } from '$lib/auth.svelte';
 	import { BAND } from '$lib/data/band';
 	import { subscribeSongs } from '$lib/firebase/songs';
-	import ChordDisplay from '$lib/components/ChordDisplay.svelte';
+	import PrintableSong from '$lib/components/PrintableSong.svelte';
+	import { exportExistingPagesAsPdf } from '$lib/pdf';
 	import type { SongDoc } from '$lib/types';
 
 	$effect(() => {
@@ -30,13 +31,49 @@
 		return allSongs.filter((s) => (s.categories ?? []).includes(category));
 	});
 
+	const bookTitle = $derived(category ?? `${BAND.name}s sangbog`);
+
+	// Forvælgere — gemmes IKKE; kun aktive for det aktuelle print-besøg.
+	let withBassTabs = $state(true);
+
 	function doPrint() {
+		// Tving document.title til bookTitle i selve print-øjeblikket — det
+		// er denne titel browseren bruger som default PDF-filnavn.
+		// Vi gemmer den oprindelige og putter den tilbage efter dialogen
+		// er lukket.
+		const prev = document.title;
+		document.title = bookTitle;
 		window.print();
+		// onafterprint fyrer i moderne browsere når print-dialog er lukket.
+		const restore = () => {
+			document.title = prev;
+			window.removeEventListener('afterprint', restore);
+		};
+		window.addEventListener('afterprint', restore);
+	}
+
+	let pdfBusy = $state(false);
+
+	async function doPdf() {
+		if (pdfBusy || filtered.length === 0) return;
+		pdfBusy = true;
+		try {
+			const pages = Array.from(document.querySelectorAll<HTMLElement>('.print-page'));
+			await exportExistingPagesAsPdf(pages, {
+				filename: bookTitle,
+				withBassTabs
+			});
+		} catch (err) {
+			console.error('PDF-eksport fejlede:', err);
+			alert('Kunne ikke generere PDF — se konsollen for detaljer.');
+		} finally {
+			pdfBusy = false;
+		}
 	}
 </script>
 
 <svelte:head>
-	<title>Print {category ?? 'sangbog'} · {BAND.name}</title>
+	<title>{bookTitle} · {BAND.name}</title>
 </svelte:head>
 
 <!-- Toolbar — skjules ved print -->
@@ -45,14 +82,27 @@
 		<a href="/songbook" class="btn-ghost">← Tilbage</a>
 		<div class="flex-1">
 			<h1 class="font-display text-lg font-bold text-[var(--color-accent)]">
-				{category ? `Print: ${category}` : 'Print: hele sangbogen'}
+				{bookTitle}
 			</h1>
 			<p class="text-xs text-[var(--color-ink-faint)]">
 				{filtered.length} {filtered.length === 1 ? 'sang' : 'sange'} — én pr. side
 			</p>
 		</div>
+		<label class="print-toggle">
+			<input type="checkbox" bind:checked={withBassTabs} />
+			Inkludér bass tabs
+		</label>
+		<button
+			type="button"
+			class="btn-secondary"
+			onclick={doPdf}
+			disabled={filtered.length === 0 || pdfBusy}
+			title="Generér PDF og hent direkte"
+		>
+			{pdfBusy ? 'Genererer…' : 'Hent PDF'}
+		</button>
 		<button type="button" class="btn-primary" onclick={doPrint} disabled={filtered.length === 0}>
-			Print / Gem som PDF
+			Print
 		</button>
 	</div>
 </header>
@@ -64,28 +114,58 @@
 		Ingen sange i {category ?? 'sangbogen'}.
 	</p>
 {:else}
-	<div class="mx-auto max-w-3xl px-6 py-6">
+	<div class="mx-auto max-w-3xl px-6 py-6" class:no-bass-tabs={!withBassTabs}>
+		<!-- Print-only forside: vises som en lille fed overskrift øverst på
+		     første A4-side. Skjules på skærm. -->
+		<div class="print-cover" aria-hidden="true">
+			<h1>{bookTitle}</h1>
+			<p>{filtered.length} {filtered.length === 1 ? 'sang' : 'sange'}</p>
+		</div>
+
 		{#each filtered as song (song.id)}
-			<article class="print-page mb-8 rounded-md bg-white p-6 text-[var(--color-ink)]">
-				<header class="mb-4 border-b border-[var(--color-border-subtle)] pb-3">
-					<h2 class="font-display text-2xl font-bold">{song.title}</h2>
-					<div class="mt-1 flex flex-wrap items-center gap-3 text-sm text-[var(--color-ink-muted)]">
-						{#if song.artist}<span>{song.artist}</span>{/if}
-						{#if song.key}<span>· Toneart: <b>{song.key}</b></span>{/if}
-						<span>· {song.barsPerLine} takter pr. linje</span>
-						{#if (song.categories ?? []).length}
-							<span>· {song.categories!.join(' · ')}</span>
-						{/if}
-					</div>
-				</header>
-				<ChordDisplay
-					rawInput={song.rawInput}
-					barsPerLine={song.barsPerLine}
-					chordLayout={song.chordLayout}
-					barEdits={song.barEdits}
-					transpose={song.transpose ?? 0}
-				/>
-			</article>
+			<PrintableSong {song} />
 		{/each}
 	</div>
 {/if}
+
+<style>
+	.print-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.85rem;
+		color: var(--color-ink-muted);
+		cursor: pointer;
+		user-select: none;
+	}
+	.print-toggle input {
+		accent-color: var(--color-accent);
+	}
+	/* `.no-bass-tabs` reglerne ligger globalt i app.css så de gælder både
+	   print-siden og enkelt-sang-siden. */
+	.print-cover {
+		display: none;
+	}
+	@media print {
+		.print-cover {
+			display: block;
+			text-align: center;
+			margin-bottom: 0.4cm;
+			padding-bottom: 0.25cm;
+			border-bottom: 1pt solid #000;
+		}
+		.print-cover h1 {
+			font-family: var(--font-display, var(--font-sans));
+			font-size: 18pt;
+			font-weight: 800;
+			color: #000;
+			margin: 0;
+			letter-spacing: 0.01em;
+		}
+		.print-cover p {
+			font-size: 9pt;
+			color: #444;
+			margin: 0.1cm 0 0;
+		}
+	}
+</style>

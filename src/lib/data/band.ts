@@ -16,8 +16,27 @@ export const BAND = {
 			email: 'simmoe@gmail.com',
 			displayName: 'Simo',
 			role: 'owner' as const
+		},
+		{
+			email: 'blinkboks@gmail.com',
+			displayName: 'Blinkboks',
+			role: 'member' as const
+		},
+		{
+			email: 'gunilla.mandsfelt@gmail.com',
+			displayName: 'Gunilla Mandsfelt',
+			role: 'member' as const
+		},
+		{
+			email: 'mikkelgerken@hotmail.com',
+			displayName: 'Mikkel Gerken',
+			role: 'member' as const
+		},
+		{
+			email: 'jeppelajer@gmail.com',
+			displayName: 'Jeppe Lajer',
+			role: 'member' as const
 		}
-		// TODO: tilføj resten af bandets medlemmer her — { email, displayName, role: 'member' }
 	]
 } as const;
 

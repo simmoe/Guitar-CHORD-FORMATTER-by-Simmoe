@@ -1,12 +1,9 @@
 <script lang="ts">
-	import type { ChordLayout } from '$lib/types';
-
 	interface Props {
 		title: string;
 		artist: string;
 		key: string;
 		barsPerLine: 2 | 4 | 8;
-		chordLayout: ChordLayout;
 		categories: string[];
 		/** Eksisterende kendte kategorier på tværs af sangbogen — bruges til datalist. */
 		knownCategories: string[];
@@ -15,7 +12,6 @@
 			artist: string;
 			key: string;
 			barsPerLine: 2 | 4 | 8;
-			chordLayout: ChordLayout;
 			categories: string[];
 		}) => void;
 	}
@@ -25,7 +21,6 @@
 		artist,
 		key,
 		barsPerLine,
-		chordLayout,
 		categories,
 		knownCategories,
 		onChange
@@ -38,10 +33,9 @@
 		artist: string;
 		key: string;
 		barsPerLine: 2 | 4 | 8;
-		chordLayout: ChordLayout;
 		categories: string[];
 	}> = {}) {
-		onChange({ title, artist, key, barsPerLine, chordLayout, categories, ...patch });
+		onChange({ title, artist, key, barsPerLine, categories, ...patch });
 	}
 
 	function addCategory(cat: string) {
@@ -112,17 +106,6 @@
 		</select>
 	</label>
 
-	<label class="field">
-		<span>Akkord-layout</span>
-		<select
-			bind:value={chordLayout}
-			onchange={() => emit({ chordLayout })}
-		>
-			<option value="separate">Akkord-skema (separat linje)</option>
-			<option value="inline">Akkord over tekst (integreret)</option>
-		</select>
-	</label>
-
 	<div class="field sm:col-span-2">
 		<span>Kategorier <em class="text-[var(--color-ink-faint)] font-normal text-xs">(koncerter, fx Summertime, Forår, Julen)</em></span>
 		<div class="cat-input-wrap">
@@ -133,7 +116,7 @@
 				onkeydown={onCategoryKey}
 				placeholder="Skriv kategori og tryk Enter…"
 			/>
-			<button type="button" class="btn-secondary !py-1.5" onclick={() => addCategory(categoryDraft)}>
+			<button type="button" class="btn-secondary btn-sm" onclick={() => addCategory(categoryDraft)}>
 				Tilføj
 			</button>
 		</div>

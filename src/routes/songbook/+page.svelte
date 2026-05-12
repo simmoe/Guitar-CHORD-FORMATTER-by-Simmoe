@@ -9,7 +9,8 @@
 	let songs = $state<SongDoc[]>([]);
 	let loadingSongs = $state(true);
 	let error = $state<string | null>(null);
-	let activeCategory = $state<string | null>(null); // null = alle
+	let activeCategory = $state<string | null>(null); // null = alle (filter)
+	let printCategory = $state<string>(''); // '' = hele sangbogen
 	let search = $state('');
 
 	$effect(() => {
@@ -53,9 +54,14 @@
 
 	function handlePrint() {
 		const params = new URLSearchParams();
-		if (activeCategory) params.set('category', activeCategory);
+		if (printCategory) params.set('category', printCategory);
 		goto(`/print?${params.toString()}`);
 	}
+
+	const printCount = $derived.by(() => {
+		if (!printCategory) return songs.length;
+		return songs.filter((s) => (s.categories ?? []).includes(printCategory)).length;
+	});
 </script>
 
 <svelte:head><title>Sangbog · {BAND.name}</title></svelte:head>
@@ -94,31 +100,46 @@
 			<span aria-hidden="true" style="font-size: 1.5rem; line-height: 1;">+</span>
 			Tilføj sang
 		</a>
-		<button
-			type="button"
-			class="btn-secondary"
-			style="padding: 1rem 1.25rem;"
-			onclick={handlePrint}
-			disabled={filteredSongs.length === 0}
-			aria-label={activeCategory ? `Print kategorien ${activeCategory}` : 'Print hele sangbogen'}
-		>
-			<svg
-				xmlns="http://www.w3.org/2000/svg"
-				width="22"
-				height="22"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-				aria-hidden="true"
-				><polyline points="6 9 6 2 18 2 18 9"></polyline><path
-					d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"
-				></path><rect x="6" y="14" width="12" height="8"></rect></svg
+		<div class="print-group">
+			<select
+				bind:value={printCategory}
+				class="print-select"
+				aria-label="Vælg hvad der skal printes"
 			>
-			{activeCategory ? `Print "${activeCategory}"` : 'Print hele sangbogen'}
-		</button>
+				<option value="">Hele sangbogen ({songs.length})</option>
+				{#each categories as cat (cat)}
+					{@const c = songs.filter((s) => (s.categories ?? []).includes(cat)).length}
+					<option value={cat}>{cat} ({c})</option>
+				{/each}
+			</select>
+			<button
+				type="button"
+				class="btn-secondary"
+				style="padding: 1rem 1.25rem;"
+				onclick={handlePrint}
+				disabled={printCount === 0}
+				aria-label={printCategory
+					? `Print kategorien ${printCategory}`
+					: 'Print hele sangbogen'}
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					width="22"
+					height="22"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+					><polyline points="6 9 6 2 18 2 18 9"></polyline><path
+						d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"
+					></path><rect x="6" y="14" width="12" height="8"></rect></svg
+				>
+				Print
+			</button>
+		</div>
 
 		<div class="ml-auto">
 			<input
@@ -198,9 +219,6 @@
 							<span class="meta-pill">
 								{song.barsPerLine} takter
 							</span>
-							<span class="meta-pill">
-								{song.chordLayout === 'inline' ? 'Akkord over tekst' : 'Akkord-skema'}
-							</span>
 							{#each song.categories ?? [] as cat (cat)}
 								<span class="cat-pill">{cat}</span>
 							{/each}
@@ -251,5 +269,35 @@
 		background: var(--color-accent-soft);
 		color: #92400e;
 		font-weight: 600;
+	}
+	.print-group {
+		display: inline-flex;
+		align-items: stretch;
+		border-radius: var(--radius-button);
+		overflow: hidden;
+		box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+	}
+	.print-select {
+		appearance: none;
+		-webkit-appearance: none;
+		background: #ffffff
+			url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%23374151' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>")
+			no-repeat right 0.85rem center;
+		border: 1px solid var(--color-border-subtle);
+		border-right: 0;
+		border-radius: var(--radius-button) 0 0 var(--radius-button);
+		padding: 0 2.25rem 0 1rem;
+		color: var(--color-ink);
+		font-weight: 600;
+		font-size: 0.9rem;
+		min-width: 12rem;
+		cursor: pointer;
+	}
+	.print-select:focus {
+		outline: 2px solid var(--color-accent);
+		outline-offset: -1px;
+	}
+	.print-group .btn-secondary {
+		border-radius: 0 var(--radius-button) var(--radius-button) 0 !important;
 	}
 </style>

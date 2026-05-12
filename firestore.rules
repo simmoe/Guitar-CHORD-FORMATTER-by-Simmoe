@@ -1,4 +1,9 @@
 rules_version = '2';
+// CANONICAL merged rules for Firebase project `p5-firebase-eebc1`.
+// Source repo: `ddu-dragdrop/firestore.rules`.
+// Before deploying, open the Console Rules tab and merge any edits that exist only there.
+// Deploy: from this folder → `firebase deploy --only firestore:rules --project p5-firebase-eebc1`
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -10,6 +15,26 @@ service cloud.firestore {
       return signedIn()
         && exists(/databases/$(database)/documents/mat_teacher_users/$(request.auth.uid))
         && get(/databases/$(database)/documents/mat_teacher_users/$(request.auth.uid)).data.role == 'teacher';
+    }
+
+    // ----------------------------------------------------------
+    // DDU assignment board (drag-drop elever) — `ddu-dragdrop`.
+    // Alle må læse levende fordeling; kun udvalgte må skrive.
+    // ----------------------------------------------------------
+    function isDduAssignmentEditor() {
+      return signedIn()
+        && request.auth.token.email in [
+          'simmoe@gmail.com',
+          'jrb@nextkbh.dk',
+          'mastermarvick@gmail.com'
+        ];
+    }
+
+    match /CURSOR_ddu_assignment/{docId} {
+      allow read: if true;
+      allow create: if isDduAssignmentEditor();
+      allow update: if isDduAssignmentEditor();
+      allow delete: if false;
     }
 
     // User profile docs

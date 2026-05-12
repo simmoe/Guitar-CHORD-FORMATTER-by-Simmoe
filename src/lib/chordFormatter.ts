@@ -1,145 +1,79 @@
 /**
- * Chord formatter — port af legacy/sketch.js til ren TypeScript.
+ * Chord/text formatter — minimal WYSIWYG-helpers.
  *
- * Tager rå chord/tekst-input (UG-format eller paste fra anden kilde) og
- * producerer en HTML-streng der kan {@html ...}-renderes i en Svelte-
- * komponent. Holder samme heuristik som legacy-versionen:
- *
- *  - Detekterer "section headers" som [Verse] / Chorus etc.
- *  - Detekterer chord-only linjer (positional eller pipe |...|)
- *  - I "separate" mode: viser akkord-linjen ovenover, og placerer
- *    rytme/bass-tabs ud for tekstlinjen nedenunder
- *  - I "inline" mode: indsætter chord-superscripts inde i tekstlinjen
- *  - Rytme-kolonnen har klikbare "bar-sep"-spans der kan toggles mellem
- *    space og taktstreg via barEdits-overrides
+ * Vi auto-genererer INTET længere: både chord-linjen (venstre) og
+ * bass-linjen (højre) er literal pipe-notation som brugeren har
+ * skrevet, og rendres ens via {@link renderBarLine}. Resten af denne
+ * fil er klassificering, transponering og HTML-entity-dekodning.
  */
 
-import type { BarEdits } from './types';
-
-export interface FormatOptions {
-	barsPerLine: 2 | 4 | 8;
-	chordLayout: 'inline' | 'separate';
-	/**
-	 * Brugerens override for hver separator i rytme-kolonnen, keyed på
-	 * `${rowIndex}:${separatorIndex}`. Findes nøglen ikke, bruges
-	 * algoritmens kvalificerede gæt.
-	 */
-	barEdits?: BarEdits;
-	/**
-	 * Hvis sat, transponeres alle akkorder med dette antal halvtoner.
-	 * Bruges både til "skift toneart"-knappen og capo-visning.
-	 */
-	transpose?: number;
-}
-
 // Regex: rod + modifier + valgfri bass-tone
-const CHORD_PATTERN = '[A-G][#b]?(?:[majsudigotb0-9#\\+\\-\\(\\)\\^∆°ø]*)(?:/[A-G][#b]?)?';
-const chordPattern = new RegExp(`(${CHORD_PATTERN})`, 'g');
-const chordOnlyLineRegex = new RegExp(`^${CHORD_PATTERN},?(\\s+${CHORD_PATTERN},?)*$`);
+export const CHORD_PATTERN = '[A-G][#b]?(?:[majsudigotb0-9#\\+\\-\\(\\)\\^∆°ø]*)(?:/[A-G][#b]?)?';
+// En akkord-linje består af akkord-tokens og/eller `-`-spacers (placeholders
+// for tomme slag) adskilt af whitespace. `|` strippes inden test.
+const chordOrSpacerToken = `(?:${CHORD_PATTERN}|-+)`;
+const chordOnlyLineRegex = new RegExp(`^${chordOrSpacerToken}(\\s+${chordOrSpacerToken})*$`);
 
-/** Hovedfunktion: rå tekst → HTML-streng for hele chord-grid'et. */
-export function formatSong(rawText: string, options: FormatOptions): string {
-	const text = preCleanInput(rawText);
-	const lines = text.split('\n');
-	const gridItems: string[] = [];
-	let mode: 'chords' | 'not-chords' = 'not-chords';
-	let pendingRhythm = '';
-	let rowIndex = 0;
+/**
+ * Stilregel: vi viser ALDRIG `A#`/`D#` — altid `Bb`/`Eb`. Andre kryds
+ * (`C#`, `F#`, `G#`) bevares.
+ */
+export function normalizeAccidentals(text: string): string {
+	return text.replace(/A#/g, 'Bb').replace(/D#/g, 'Eb');
+}
 
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
+/** Sand hvis linjen er en akkord-only linje (med eller uden pipes). */
+export function isChordLine(line: string): boolean {
+	const stripped = line.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
+	if (!stripped) return false;
+	return chordOnlyLineRegex.test(stripped);
+}
 
-		// "--" → kommentar/spacer som vises som ren tekst
-		if (line.includes('--')) {
-			gridItems.push(`<div class="lyrics-cell">${escapeHtml(line)}</div>`);
-			gridItems.push(`<div class="rhythm-cell"></div>`);
-			rowIndex++;
-			mode = 'not-chords';
+// ============================================================================
+// Render én pipe/bar-linje (chord ELLER bass — samme format)
+// ============================================================================
+
+/**
+ * Render en linje i pipe-notation til HTML. Tokens parses som enten
+ * `|` (taktstreg), `-` (placeholder for tomt slag) eller chord-navn.
+ *
+ * Eksempler:
+ *  - `"C | F | G | Am"` → fire takter
+ *  - `"Bb C | Dm"` → to akkorder i første takt, én i anden
+ *  - `"C - - F"` → akkord, to tomme slag, akkord (dashes vises muted)
+ *  - `"C    F    G    Am"` (uden pipes) → fire akkorder uden takter
+ *
+ * `transpose` flytter alle akkorder med n halvtoner. Returnerer en
+ * tom streng hvis linjen ikke indeholder akkorder.
+ */
+export function renderBarLine(line: string, transpose: number = 0): string {
+	if (!line || line.trim() === '') return '';
+	const tokens = line.trim().split(/\s+/);
+	const out: string[] = [];
+	let prevWasBar = false;
+	for (const tok of tokens) {
+		if (tok === '|') {
+			out.push(`<span class="bar-sep">|</span>`);
+			prevWasBar = true;
 			continue;
 		}
-
-		// Section header [Verse], Chorus, Omkvæd, Intro, …
-		if (isSectionHeader(line)) {
-			const cleanLine = line.replace(/[\[\]]/g, '').trim();
-			gridItems.push(`<div class="section-header-cell">${formatSectionHeader(cleanLine)}</div>`);
-			mode = 'not-chords';
-			pendingRhythm = '';
-			continue;
-		}
-
-		// Chord-only linje
-		if (isPipeChordLine(line) || chordOnlyLineRegex.test(line.trim())) {
-			let nextIdx = i + 1;
-			while (nextIdx < lines.length && lines[nextIdx].trim() === '') nextIdx++;
-			const nextLine = nextIdx < lines.length ? lines[nextIdx] : '';
-			const nextIsLyrics =
-				nextLine.trim() !== '' &&
-				!isSectionHeader(nextLine) &&
-				!isPipeChordLine(nextLine) &&
-				!chordOnlyLineRegex.test(nextLine.trim());
-
-			if (nextIsLyrics && options.chordLayout === 'inline') {
-				mode = 'chords';
-				continue;
-			}
-
-			// Separate mode (eller chord-line uden lyric efter): vis akkord-linjen
-			const lyricsCell = `<span class="chord-line">${escapeHtml(transposeChordsInLine(line.replace(/\s+$/, ''), options.transpose ?? 0))}</span>`;
-			let refLine = line;
-			if (!line.includes('|')) {
-				const lyricRef = nextIsLyrics ? nextLine : '';
-				if (lyricRef.length > refLine.length) refLine = lyricRef;
-			}
-			const rhythm = extractRhythmPattern(line, refLine, options, rowIndex);
-
-			if (nextIsLyrics) {
-				pendingRhythm = rhythm;
-				gridItems.push(`<div class="lyrics-cell">${lyricsCell}</div>`);
-				gridItems.push(`<div class="rhythm-cell"></div>`);
-			} else {
-				gridItems.push(`<div class="lyrics-cell">${lyricsCell}</div>`);
-				gridItems.push(`<div class="rhythm-cell">${rhythm}</div>`);
-			}
-			rowIndex++;
-			mode = 'not-chords';
-			continue;
-		}
-
-		// Tom linje → spring helt over
-		if (line.trim() === '') {
-			mode = 'not-chords';
-			continue;
-		}
-
-		// Lyric-linje
-		let lyricsCell: string;
-		let rhythmCell = '';
-		if (mode === 'chords') {
-			lyricsCell = formatChordTextPair(lines[i - 1], line, options);
-			rhythmCell = extractRhythmPattern(lines[i - 1], line, options, rowIndex);
-			mode = 'not-chords';
+		if (out.length > 0) out.push(' ');
+		if (/^-+$/.test(tok)) {
+			out.push(`<span class="chord-spacer">${tok}</span>`);
 		} else {
-			lyricsCell = escapeHtml(line);
-			rhythmCell = pendingRhythm;
-			pendingRhythm = '';
+			const name = transpose === 0 ? normalizeAccidentals(tok) : transposeChord(tok, transpose);
+			out.push(`<b class="bass-chord">${escapeHtml(name)}</b>`);
 		}
-		gridItems.push(`<div class="lyrics-cell">${lyricsCell}</div>`);
-		gridItems.push(`<div class="rhythm-cell">${rhythmCell}</div>`);
-		rowIndex++;
+		prevWasBar = false;
 	}
-
-	return `<div class="chord-grid">${gridItems.join('')}</div>`;
+	return out.join('');
 }
 
 // ============================================================================
-// Sektionshjælpere — tæt på legacy
+// Sektionshjælpere
 // ============================================================================
 
-function preCleanInput(text: string): string {
-	return text.trim().replace(/(\n\s*){3,}/g, '\n\n');
-}
-
-function isSectionHeader(line: string): boolean {
+export function isSectionHeader(line: string): boolean {
 	const l = line.trim().toLowerCase();
 	if (l.length > 50) return false;
 	return (
@@ -148,237 +82,58 @@ function isSectionHeader(line: string): boolean {
 		l.includes('vers') ||
 		l.includes('chorus') ||
 		l.includes('omkvæd') ||
+		l.includes('refræn') ||
 		l.includes('bridge') ||
 		l.includes('c-stykke') ||
 		l.includes('intro') ||
-		l.includes('outro')
+		l.includes('outro') ||
+		l.includes('solo') ||
+		l.includes('interlude') ||
+		l.includes('mellemspil') ||
+		l.includes('coda')
 	);
 }
 
-function isPipeChordLine(line: string): boolean {
-	const stripped = line.replace(/\|/g, '').trim();
-	if (!stripped) return false;
-	return (
-		line.includes('|') &&
-		new RegExp(`^${CHORD_PATTERN}(\\s+${CHORD_PATTERN})*$`).test(stripped)
-	);
+/** Fjern firkantede klammer, hash-tegn og lignende UG-dekoration. */
+export function cleanSectionHeader(text: string): string {
+	return text
+		.replace(/[\[\]]/g, '')
+		.replace(/^#+\s*/g, '')
+		.replace(/^[-=*_]{2,}\s*/g, '')
+		.replace(/\s*[-=*_]{2,}\s*$/g, '')
+		.trim();
 }
 
-function formatSectionHeader(text: string): string {
-	const t = text.trim().toLowerCase();
-	let bg = '#eeeeee';
-	if (t.includes('verse') || t.includes('vers')) bg = '#e8f5e9';
-	else if (t.includes('chorus') || t.includes('omkvæd')) bg = '#ffebee';
-	else if (t.includes('bridge') || t.includes('c-stykke')) bg = '#fff3e0';
-	else if (t.includes('intro')) bg = '#e3f2fd';
-	else if (t.includes('outro')) bg = '#f3e5f5';
-	return `<div class="section-header" style="background-color:${bg};">${escapeHtml(text)}</div>`;
+export type SectionHeaderType =
+	| 'intro'
+	| 'verse'
+	| 'pre-chorus'
+	| 'chorus'
+	| 'bridge'
+	| 'solo'
+	| 'interlude'
+	| 'outro'
+	| 'coda'
+	| 'other';
+
+export function sectionHeaderType(text: string): SectionHeaderType {
+	const t = cleanSectionHeader(text).toLowerCase();
+	if (t.includes('pre-chorus') || t.includes('pre chorus') || t.includes('prechorus')) {
+		return 'pre-chorus';
+	}
+	if (t.includes('verse') || t.includes('vers')) return 'verse';
+	if (t.includes('chorus') || t.includes('omkvæd') || t.includes('refræn')) return 'chorus';
+	if (t.includes('bridge') || t.includes('c-stykke')) return 'bridge';
+	if (t.includes('intro')) return 'intro';
+	if (t.includes('outro')) return 'outro';
+	if (t.includes('solo')) return 'solo';
+	if (t.includes('interlude') || t.includes('mellemspil')) return 'interlude';
+	if (t.includes('coda') || /\btag\b/.test(t)) return 'coda';
+	return 'other';
 }
 
 export function escapeHtml(str: string): string {
 	return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-// ============================================================================
-// Rytme-kolonne: bar-segmenter + klikbare separators
-// ============================================================================
-
-function extractRhythmPattern(
-	chordLine: string,
-	referenceLine: string | null,
-	options: FormatOptions,
-	rowIndex: number
-): string {
-	const transpose = options.transpose ?? 0;
-	const chordToLabel = (fullChord: string): string => {
-		let tone = fullChord;
-		if (fullChord.includes('/')) {
-			tone = fullChord.split('/')[1];
-		} else {
-			const rootMatch = fullChord.match(/^[A-G][#b]?/);
-			if (rootMatch) tone = rootMatch[0];
-		}
-		const transposed = transpose === 0 ? tone : transposeChord(tone, transpose);
-		return `<b class="bass-chord">${escapeHtml(transposed)}</b>`;
-	};
-
-	// Pipe-bar notation: trust den som den er
-	if (chordLine.includes('|')) {
-		const segments = chordLine
-			.split('|')
-			.map((s) => s.trim())
-			.filter((s) => s.length > 0);
-		if (segments.length > 0) {
-			const bars = segments.map((seg) => {
-				const labels: string[] = [];
-				let m: RegExpExecArray | null;
-				chordPattern.lastIndex = 0;
-				while ((m = chordPattern.exec(seg)) !== null) {
-					labels.push(chordToLabel(m[0]));
-				}
-				return labels;
-			});
-			fillEmptyBars(bars);
-			return renderBarsWithToggleableSeparators(bars, options.barEdits, rowIndex);
-		}
-	}
-
-	// Positional inferens
-	const chordsWithPos: { label: string; pos: number }[] = [];
-	let match: RegExpExecArray | null;
-	chordPattern.lastIndex = 0;
-	while ((match = chordPattern.exec(chordLine)) !== null) {
-		chordsWithPos.push({ label: chordToLabel(match[0]), pos: match.index });
-	}
-	if (chordsWithPos.length === 0) return '';
-
-	const barsPerLine = options.barsPerLine;
-	const refLen = referenceLine ? referenceLine.length : 0;
-	const lastPos = chordsWithPos[chordsWithPos.length - 1].pos;
-	const gaps: number[] = [];
-	for (let g = 1; g < chordsWithPos.length; g++) {
-		gaps.push(chordsWithPos[g].pos - chordsWithPos[g - 1].pos);
-	}
-	const avgGap = gaps.length > 0 ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
-	const positionalLen = lastPos + Math.max(avgGap, 3);
-	const lineLen = Math.max(chordLine.length, refLen, positionalLen, 1);
-	const barWidth = lineLen / barsPerLine;
-
-	const bars: string[][] = [];
-	for (let b = 0; b < barsPerLine; b++) bars.push([]);
-	for (const c of chordsWithPos) {
-		const barIndex = Math.min(Math.floor(c.pos / barWidth), barsPerLine - 1);
-		bars[barIndex].push(c.label);
-	}
-	fillEmptyBars(bars);
-	return renderBarsWithToggleableSeparators(bars, options.barEdits, rowIndex);
-}
-
-function fillEmptyBars(bars: string[][]): void {
-	let lastChord: string | null = null;
-	for (let b = 0; b < bars.length; b++) {
-		if (bars[b].length === 0 && lastChord) {
-			bars[b].push(lastChord);
-		} else if (bars[b].length > 0) {
-			lastChord = bars[b][bars[b].length - 1];
-		}
-	}
-	// Hvis første takter også er tomme, prøv at fylde dem fra første kendte
-	if (lastChord) {
-		for (let b = 0; b < bars.length; b++) {
-			if (bars[b].length === 0) bars[b].push(lastChord);
-		}
-	}
-}
-
-function renderBarsWithToggleableSeparators(
-	bars: string[][],
-	barEdits: BarEdits | undefined,
-	rowIndex: number
-): string {
-	let out = '';
-	let sepIndex = 0;
-	for (let b = 0; b < bars.length; b++) {
-		for (let c = 0; c < bars[b].length; c++) {
-			out += bars[b][c];
-			const isLastInBar = c === bars[b].length - 1;
-			const isLastBar = b === bars.length - 1;
-			if (isLastInBar && isLastBar) continue;
-
-			const defaultType: 'bar' | 'space' = isLastInBar ? 'bar' : 'space';
-			const editKey = `${rowIndex}:${sepIndex}`;
-			const type = barEdits?.[editKey] ?? defaultType;
-			const title =
-				type === 'bar' ? 'Klik for at fjerne taktstreg' : 'Klik for at indsætte taktstreg';
-			const content = type === 'bar' ? ' | ' : ' ';
-			out += `<span class="bar-sep" data-type="${type}" data-key="${editKey}" title="${title}">${content}</span>`;
-			sepIndex++;
-		}
-	}
-	return out;
-}
-
-// ============================================================================
-// Inline mode: indsæt chord-superscripts i tekstlinjen
-// ============================================================================
-
-function formatChordTextPair(
-	chordLine: string,
-	lyricLine: string,
-	options: FormatOptions
-): string {
-	const transpose = options.transpose ?? 0;
-	let formattedLine = '';
-	let startCoords = 0;
-	let trailingChordCount = 0;
-
-	chordPattern.lastIndex = 0;
-	const matches: { chord: string; index: number }[] = [];
-	let m: RegExpExecArray | null;
-	while ((m = chordPattern.exec(chordLine)) !== null) {
-		matches.push({ chord: m[0], index: m.index });
-	}
-
-	if (matches.length === 0) return escapeHtml(lyricLine);
-
-	for (let i = 0; i < matches.length; i++) {
-		const { chord, index: chordIndex } = matches[i];
-		let insertPos = chordIndex;
-
-		if (insertPos < lyricLine.length && lyricLine[insertPos] === ' ') {
-			let nextWordIdx = -1;
-			for (let k = insertPos; k < lyricLine.length; k++) {
-				if (lyricLine[k] !== ' ') {
-					nextWordIdx = k;
-					break;
-				}
-			}
-			if (nextWordIdx !== -1 && nextWordIdx - insertPos < 5) insertPos = nextWordIdx;
-		}
-
-		if (
-			insertPos > 0 &&
-			insertPos < lyricLine.length &&
-			lyricLine[insertPos] !== ' ' &&
-			lyricLine[insertPos - 1] !== ' '
-		) {
-			let wStart = insertPos;
-			while (wStart > 0 && lyricLine[wStart - 1] !== ' ') wStart--;
-			let wEnd = insertPos;
-			while (wEnd < lyricLine.length && lyricLine[wEnd] !== ' ') wEnd++;
-			if (wEnd - wStart <= 6) insertPos = wStart;
-		}
-
-		if (insertPos < startCoords) insertPos = startCoords;
-
-		const transposedChord = transpose === 0 ? chord : transposeChord(chord, transpose);
-
-		if (insertPos >= lyricLine.length) {
-			if (startCoords < lyricLine.length) {
-				formattedLine += escapeHtml(lyricLine.substring(startCoords));
-				startCoords = lyricLine.length;
-			}
-			if (trailingChordCount > 0) {
-				formattedLine += `<sup class='chord'>| ${escapeHtml(transposedChord)}</sup> `;
-			} else {
-				const padding = formattedLine.length > 0 && !formattedLine.endsWith(' ') ? ' ' : '';
-				formattedLine += padding + `<sup class='chord'>${escapeHtml(transposedChord)}</sup> `;
-			}
-			trailingChordCount++;
-			continue;
-		}
-
-		if (insertPos > startCoords) {
-			formattedLine += escapeHtml(lyricLine.substring(startCoords, insertPos));
-		}
-		formattedLine += `<sup class='chord'>${escapeHtml(transposedChord)}</sup>`;
-		startCoords = insertPos;
-	}
-
-	if (startCoords < lyricLine.length) {
-		formattedLine += escapeHtml(lyricLine.substring(startCoords));
-	}
-	return formattedLine;
 }
 
 // ============================================================================
@@ -394,17 +149,16 @@ const FLAT_TO_SHARP: Record<string, string> = {
 	Bb: 'A#'
 };
 
-/** Transponer en enkelt chord-string (root + modifier + evt. /bass) med n halvtoner. */
+/** Transponer én akkord (root + modifier + evt. /bass) med n halvtoner. */
 export function transposeChord(chord: string, semitones: number): string {
-	if (semitones === 0) return chord;
-	// Match root, modifier, bass
+	if (semitones === 0) return normalizeAccidentals(chord);
 	const re = /^([A-G][#b]?)([^/]*)(?:\/([A-G][#b]?))?$/;
 	const m = chord.match(re);
-	if (!m) return chord;
+	if (!m) return normalizeAccidentals(chord);
 	const [, root, modifier, bass] = m;
 	const newRoot = shiftNote(root, semitones);
 	const newBass = bass ? shiftNote(bass, semitones) : null;
-	return newRoot + modifier + (newBass ? '/' + newBass : '');
+	return normalizeAccidentals(newRoot + modifier + (newBass ? '/' + newBass : ''));
 }
 
 function shiftNote(note: string, semitones: number): string {
@@ -416,28 +170,91 @@ function shiftNote(note: string, semitones: number): string {
 }
 
 /**
- * Transponer alle akkorder INDE i en linje (chord-only line eller pipe-line)
- * mens whitespace og pipes bevares præcist — for at chord-positions stadig
- * stemmer over tekstlinjen i monospace-rendering.
+ * Transponer hele rawInput-strengen: kun chord-only linjer får skiftet
+ * deres akkorder; lyric-linjer og section-headers bevares.
+ */
+export function transposeRawInput(rawInput: string, semitones: number): string {
+	const lines = rawInput.split('\n');
+	return lines
+		.map((line) => {
+			if (isSectionHeader(line)) return line;
+			if (isChordLine(line)) return transposeChordsInLine(line, semitones);
+			return line;
+		})
+		.join('\n');
+}
+
+/** Transponer alle akkorder i en bass-linje (pipe-notation). */
+export function transposeBassLine(line: string, semitones: number): string {
+	if (semitones === 0) return normalizeAccidentals(line);
+	return transposeChordsInLine(line, semitones);
+}
+
+/**
+ * Normalisér alle akkorder uden at transponere — A# → Bb, D# → Eb, +
+ * dekod evt. HTML-entities. Kaldes ved load fra Firestore og i save.
+ */
+export function normalizeRawInputAccidentals(rawInput: string): string {
+	return transposeRawInput(decodeHtmlEntities(rawInput), 0);
+}
+
+const NAMED_HTML_ENTITIES: Record<string, string> = {
+	amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+	nbsp: '\u00a0', hellip: '…', ndash: '–', mdash: '—',
+	lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
+	aelig: 'æ', AElig: 'Æ', oslash: 'ø', Oslash: 'Ø',
+	aring: 'å', Aring: 'Å', auml: 'ä', Auml: 'Ä',
+	ouml: 'ö', Ouml: 'Ö', uuml: 'ü', Uuml: 'Ü', szlig: 'ß',
+	eacute: 'é', Eacute: 'É', egrave: 'è', Egrave: 'È',
+	ecirc: 'ê', Ecirc: 'Ê', euml: 'ë', Euml: 'Ë',
+	agrave: 'à', Agrave: 'À', acirc: 'â', Acirc: 'Â',
+	atilde: 'ã', Atilde: 'Ã', ccedil: 'ç', Ccedil: 'Ç',
+	iacute: 'í', Iacute: 'Í', igrave: 'ì', Igrave: 'Ì',
+	icirc: 'î', Icirc: 'Î', iuml: 'ï', Iuml: 'Ï',
+	oacute: 'ó', Oacute: 'Ó', ograve: 'ò', Ograve: 'Ò',
+	ocirc: 'ô', Ocirc: 'Ô', otilde: 'õ', Otilde: 'Õ',
+	uacute: 'ú', Uacute: 'Ú', ugrave: 'ù', Ugrave: 'Ù',
+	ucirc: 'û', Ucirc: 'Û', ntilde: 'ñ', Ntilde: 'Ñ',
+	yacute: 'ý', Yacute: 'Ý'
+};
+
+export function decodeHtmlEntities(text: string): string {
+	if (!text || text.indexOf('&') === -1) return text;
+	return text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (full, body) => {
+		if (body[0] === '#') {
+			const hex = body[1] === 'x' || body[1] === 'X';
+			const num = parseInt(body.slice(hex ? 2 : 1), hex ? 16 : 10);
+			if (Number.isFinite(num) && num > 0 && num < 0x110000) {
+				try {
+					return String.fromCodePoint(num);
+				} catch {
+					return full;
+				}
+			}
+			return full;
+		}
+		return NAMED_HTML_ENTITIES[body] ?? full;
+	});
+}
+
+/**
+ * Transponer alle akkorder INDE i en linje (pipes/whitespace bevares).
+ * Selv ved semitones=0 gennemløbes alle akkorder for at anvende
+ * `normalizeAccidentals`.
  */
 function transposeChordsInLine(line: string, semitones: number): string {
-	if (semitones === 0) return line;
 	return line.replace(new RegExp(CHORD_PATTERN, 'g'), (chord) => {
 		const transposed = transposeChord(chord, semitones);
-		// Pad med spaces hvis transposed er kortere/længere så positions bevares
 		if (transposed.length === chord.length) return transposed;
-		// Kortere: pad med space efter
 		if (transposed.length < chord.length) {
 			return transposed + ' '.repeat(chord.length - transposed.length);
 		}
-		// Længere: trim det fra det efterfølgende whitespace ved render-tid (kan ikke
-		// gøres deterministisk her, så vi accepterer at linjen bliver lidt længere).
 		return transposed;
 	});
 }
 
 // ============================================================================
-// Kategorier — udtræk unikke fra alle sange
+// Kategorier
 // ============================================================================
 
 export function uniqueCategoriesFromSongs(

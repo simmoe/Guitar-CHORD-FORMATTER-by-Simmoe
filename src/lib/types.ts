@@ -1,4 +1,5 @@
 import type { Timestamp } from 'firebase/firestore';
+import type { Row } from './songParse';
 
 export type Role = 'owner' | 'member';
 
@@ -17,34 +18,52 @@ export interface BandDoc {
 	createdAt: Timestamp;
 }
 
-export type ChordLayout = 'inline' | 'separate';
+/**
+ * Bass-linjen for hver chord-row, gemt præcis som brugeren har skrevet
+ * den (typisk pipe-notation, fx `"Gm | Bb C"`). Key er chord-rækkens
+ * rowIndex som streng. Tom/ikke-sat = tom celle. Dette er den ENESTE
+ * kilde til bass-data — vi auto-genererer ingenting længere.
+ */
+export type BassLines = Record<string, string>;
 
 /**
- * Per-separator override for the rhythm/bass column. Stored as a sparse
- * record keyed by `${lineIndex}:${separatorIndex}` → 'bar' | 'space'.
- * Undefined keys keep the algorithm's qualified guess.
+ * Sektioner (Verse, Chorus, …) brugeren har klappet sammen. Identificeret
+ * via headerens 0-baserede index i sangens header-liste.
  */
-export type BarEdits = Record<string, 'bar' | 'space'>;
+export type CollapsedSections = number[];
 
 export interface SongDoc {
 	id: string;
 	title: string;
 	artist?: string;
-	key?: string; // toneart, fx 'A', 'Em'
-	capo?: number; // 0–11
-	transpose?: number; // halftones, +/−
-	rawInput: string; // raw chord+lyric text (UG-format eller paste)
-	barsPerLine: 2 | 4 | 8;
-	chordLayout: ChordLayout;
-	barEdits?: BarEdits;
+	key?: string;
+	capo?: number;
+	transpose?: number;
+	rawInput: string;
 	/**
-	 * Kategorier (koncert-temaer) som sangen er en del af, fx
-	 * ["Summertime", "Forår", "Julen"]. Frit-tekst og deles på tværs af
-	 * bandets sange — `uniqueCategoriesFromSongs()` udtrækker alle kendte.
+	 * Strukturerede rækker. Kanonisk fra v4 og frem — brugerens type-valg
+	 * (chord/lyric/header/blank) per række persisteres her i stedet for
+	 * at blive heuristisk udledt fra `rawInput` ved hver load.
+	 *
+	 * `rawInput` bevares som læsbar fallback / søge-felt og holdes i
+	 * sync med `serializeRows(rows)` ved hvert save.
 	 */
+	rows?: Row[];
+	barsPerLine: 2 | 4 | 8;
+	bassLines?: BassLines;
+	collapsedSections?: CollapsedSections;
 	categories?: string[];
-	sourceUrl?: string; // hvis hentet fra Ultimate Guitar
+	sourceUrl?: string;
 	notes?: string;
+	/**
+	 * Skema-version.
+	 * - v3 = ren WYSIWYG: chord-linjen er literal, bass-linjen er kun
+	 *   det brugeren har skrevet. Migreres fra v1/v2 i `migrateToV3`.
+	 * - v4 = `rows: Row[]` er kanonisk; brugerens kind-valg per række
+	 *   bevares. `rawInput` er nu læsbar fallback. Migreres fra v3 i
+	 *   `migrateToV4` (`src/lib/migrate.ts`).
+	 */
+	schemaVersion?: number;
 	createdBy: string;
 	createdAt: Timestamp;
 	updatedAt: Timestamp;
@@ -53,7 +72,7 @@ export interface SongDoc {
 
 export interface SetlistEntry {
 	songId: string;
-	keyOverride?: string; // hvis sangen skal i en anden toneart end gemt
+	keyOverride?: string;
 	transposeOverride?: number;
 	notes?: string;
 }
