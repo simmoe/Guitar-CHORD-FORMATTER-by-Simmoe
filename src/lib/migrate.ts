@@ -15,9 +15,9 @@
  *
  * Migration er idempotent: kør på v4 → ingen ændring.
  */
-import type { SongDoc } from './types';
+import type { SongDoc, BassLines } from './types';
 import { CHORD_PATTERN, isSectionHeader, normalizeAccidentals, transposeChord } from './chordFormatter';
-import { parseRows } from './songParse';
+import { parseRows, type Row } from './songParse';
 
 const V3 = 3;
 const V4 = 4;
@@ -71,6 +71,27 @@ export function migrateToV4(input: SongDoc): SongDoc {
 		rows: parseRows(input.rawInput ?? ''),
 		schemaVersion: V4
 	};
+}
+
+/**
+ * Auto-fyld `bassLines` ud fra akkord-rækker (samme algoritme som
+ * migrationen bruger under v3-frysning). Kald ved ny sang — fx UG-import —
+ * så højre kolonne ikke starter tom.
+ */
+export function inferBassLinesForImportedRows(
+	rows: Row[],
+	barsPerLine: 2 | 4 | 8
+): BassLines {
+	const out: BassLines = {};
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i];
+		if (row.kind !== 'chord') continue;
+		const next = rows[i + 1];
+		const lyric = next?.kind === 'lyric' ? next.text : '';
+		const auto = legacyComputeBassLine(row.text, lyric, barsPerLine, {}, i);
+		if (auto.trim() !== '') out[String(i)] = auto;
+	}
+	return out;
 }
 
 /** Migrer ÉT dokument. Returnér uændret hvis allerede v3. */

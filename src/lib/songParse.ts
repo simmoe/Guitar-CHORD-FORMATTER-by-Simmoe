@@ -36,6 +36,31 @@ export function parseRows(rawInput: string): Row[] {
 	return rows;
 }
 
+const IMPORTED_CHORD_GAP_WIDTH = 5;
+
+function replaceWideChordGaps(line: string): string {
+	return line
+		.trim()
+		.replace(/\s{3,}/g, (gap) => {
+			const spacerCount = Math.max(1, Math.round(gap.length / IMPORTED_CHORD_GAP_WIDTH));
+			return ` ${Array(spacerCount).fill('-').join(' ')} `;
+		})
+		.replace(/\s+/g, ' ');
+}
+
+/**
+ * Engangs-normalisering til importerede/pastede sange: UG bruger ofte
+ * brede mellemrum til akkordplacering, men editoren kollapser whitespace
+ * visuelt. Vi gør kun de store gaps eksplicitte med `-` placeholders.
+ */
+export function normalizeImportedChordSpacing(rows: Row[]): Row[] {
+	return rows.map((row) =>
+		row.kind === 'chord' && /\s{3,}/.test(row.text)
+			? { kind: 'chord', text: replaceWideChordGaps(row.text) }
+			: row
+	);
+}
+
 export function serializeRows(rows: Row[]): string {
 	return rows
 		.map((r) => (r.kind === 'blank' ? '' : r.text))

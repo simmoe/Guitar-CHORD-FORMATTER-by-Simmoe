@@ -11,7 +11,13 @@
 	} from '$lib/chordFormatter';
 	import EditableSong from '$lib/components/EditableSong.svelte';
 	import SongMetaForm from '$lib/components/SongMetaForm.svelte';
-	import { parseRows, serializeRows, type Row } from '$lib/songParse';
+	import { inferBassLinesForImportedRows } from '$lib/migrate';
+	import {
+		normalizeImportedChordSpacing,
+		parseRows,
+		serializeRows,
+		type Row
+	} from '$lib/songParse';
 	import type { SongDoc } from '$lib/types';
 
 	$effect(() => {
@@ -50,15 +56,18 @@
 			// Engangs-konvertering ved import: parse den rå UG-tekst til
 			// strukturerede rows og gem som ny v4-form.
 			const rawNormalized = normalizeRawInputAccidentals(ug.rawInput);
-			const importedRows = parseRows(rawNormalized);
+			const importedRows = normalizeImportedChordSpacing(parseRows(rawNormalized));
+			const barsPL: 2 | 4 | 8 = 4;
+			const bassLines = inferBassLinesForImportedRows(importedRows, barsPL);
 			const id = await createSong(
 				{
 					title: ug.title || t,
 					...(artistVal ? { artist: artistVal } : {}),
 					...(ug.keyGuess ? { key: normalizeAccidentals(ug.keyGuess) } : {}),
-					rawInput: rawNormalized,
+					rawInput: serializeRows(importedRows),
 					rows: importedRows,
-					barsPerLine: 4,
+					barsPerLine: barsPL,
+					...(Object.keys(bassLines).length > 0 ? { bassLines } : {}),
 					categories: [],
 					schemaVersion: 4,
 					...(ug.sourceUrl ? { sourceUrl: ug.sourceUrl } : {}),
@@ -110,15 +119,18 @@
 		saveError = null;
 		saving = true;
 		try {
-			const rawSerialized = serializeRows(rows);
+			const importedRows = normalizeImportedChordSpacing(rows);
+			const rawSerialized = serializeRows(importedRows);
+			const bassLines = inferBassLinesForImportedRows(importedRows, barsPerLine);
 			const id = await createSong(
 				{
 					title: title.trim(),
 					...(artist.trim() ? { artist: artist.trim() } : {}),
 					...(key.trim() ? { key: normalizeAccidentals(key.trim()) } : {}),
 					rawInput: normalizeRawInputAccidentals(rawSerialized),
-					rows,
+					rows: importedRows,
 					barsPerLine,
+					...(Object.keys(bassLines).length > 0 ? { bassLines } : {}),
 					categories,
 					schemaVersion: 4
 				},
