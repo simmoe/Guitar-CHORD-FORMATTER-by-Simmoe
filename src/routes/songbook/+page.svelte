@@ -52,7 +52,7 @@
 		goto('/login');
 	}
 
-	function handlePrint() {
+	function handlePdfBook() {
 		const params = new URLSearchParams();
 		if (printCategory) params.set('category', printCategory);
 		goto(`/print?${params.toString()}`);
@@ -89,7 +89,7 @@
 		{/if}
 	</header>
 
-	<!-- Action bar: stort + til ny sang, og stort print-ikon for valgt kategori -->
+	<!-- Action bar: stort + til ny sang, og samlet PDF for valgt kategori -->
 	<div class="mb-6 flex flex-wrap items-center gap-3">
 		<a
 			href="/songbook/new"
@@ -104,7 +104,7 @@
 			<select
 				bind:value={printCategory}
 				class="print-select"
-				aria-label="Vælg hvad der skal printes"
+				aria-label="Vælg hvad der skal eksporteres som PDF"
 			>
 				<option value="">Hele sangbogen ({songs.length})</option>
 				{#each categories as cat (cat)}
@@ -116,11 +116,11 @@
 				type="button"
 				class="btn-secondary"
 				style="padding: 1rem 1.25rem;"
-				onclick={handlePrint}
+				onclick={handlePdfBook}
 				disabled={printCount === 0}
 				aria-label={printCategory
-					? `Print kategorien ${printCategory}`
-					: 'Print hele sangbogen'}
+					? `Lav PDF for kategorien ${printCategory}`
+					: 'Lav PDF for hele sangbogen'}
 			>
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
@@ -137,7 +137,7 @@
 						d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"
 					></path><rect x="6" y="14" width="12" height="8"></rect></svg
 				>
-				Print
+				PDF
 			</button>
 		</div>
 

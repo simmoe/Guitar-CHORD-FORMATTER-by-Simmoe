@@ -22,50 +22,145 @@ import type { SongDoc } from './types';
 interface ExportOptions {
 	filename: string;
 	withBassTabs?: boolean;
+	fitSinglePage?: boolean;
 	scale?: number;
 	imageFormat?: 'png' | 'jpeg';
 	jpegQuality?: number;
 }
 
+const MIN_LAYOUT_SCALE = 0.55;
+const MAX_LAYOUT_SCALE = 1.45;
+const FIT_HEIGHT_SAFETY = 0.995;
+const PDF_MARGIN_MM = 5;
+const OFFSCREEN_PAGE_PADDING = '2mm 3mm';
+
+interface SavedStyles {
+	el: HTMLElement;
+	layoutScale: string;
+}
+
+function clamp(n: number, min: number, max: number): number {
+	return Math.min(max, Math.max(min, n));
+}
+
+function restoreStyles(el: HTMLElement, saved: SavedStyles): void {
+	saved.el.style.setProperty('--pdf-layout-scale', saved.layoutScale);
+}
+
+async function waitForLayout(): Promise<void> {
+	await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+}
+
+async function applyLayoutScale(
+	el: HTMLElement,
+	targetHeightPx: number,
+	fitSinglePage: boolean
+): Promise<SavedStyles> {
+	const scaleEl = (el.matches('.print-page')
+		? el
+		: el.querySelector<HTMLElement>('.print-page')) ?? el;
+	const saved: SavedStyles = {
+		el: scaleEl,
+		layoutScale: scaleEl.style.getPropertyValue('--pdf-layout-scale')
+	};
+	scaleEl.style.setProperty('--pdf-layout-scale', '1');
+	await waitForLayout();
+
+	if (!fitSinglePage) return saved;
+
+	const naturalHeight = el.scrollHeight;
+	if (naturalHeight <= 0) return saved;
+
+	let low = MIN_LAYOUT_SCALE;
+	let high = MAX_LAYOUT_SCALE;
+	let best = MIN_LAYOUT_SCALE;
+
+	for (let i = 0; i < 8; i++) {
+		const mid = (low + high) / 2;
+		scaleEl.style.setProperty('--pdf-layout-scale', String(mid));
+		await waitForLayout();
+		if (el.scrollHeight <= targetHeightPx) {
+			best = mid;
+			low = mid;
+		} else {
+			high = mid;
+		}
+	}
+
+	scaleEl.style.setProperty('--pdf-layout-scale', String(best));
+	await waitForLayout();
+	return saved;
+}
+
 /**
- * Konverter et array af DOM-elementer (hver = én side) til en PDF og
- * trigger download. Hver side skaleres så den fylder A4'eren bredde med
- * 10mm margin og clipper hvis indholdet er for højt (sjældent for
- * chord-sheets).
+ * Konverter et array af DOM-elementer (hver = én sang) til en PDF og
+ * trigger download.
  *
- * Default: PNG ved scale 3. Det er lossless og giver skarp tekst i
- * stedet for JPEG-komprimeringens "udvaskede" snapshot-look. Filerne
- * bliver lidt større, men chord-sheets fylder typisk fortsat under 2 MB
- * pr. side.
+ * `fitSinglePage` (default `true`): vi justerer PDF-layoutets
+ * CSS-variable `--pdf-layout-scale`, så korte/collapsede sange kan vokse
+ * og lange sange kan krympe inden snapshot. Hvis indholdet stadig er for
+ * højt efter minimumsskalaen, deles snapshot'et over flere A4-sider.
+ *
+ * Default-output er PNG ved scale 3 — lossless og skarpt.
  */
 async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<void> {
-	const scale = opts.scale ?? 3;
+	const fitSinglePage = opts.fitSinglePage ?? true;
+	const renderScale = opts.scale ?? 3;
 	const imageFormat = opts.imageFormat ?? 'png';
 	const jpegQuality = opts.jpegQuality ?? 0.92;
 
 	const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-	const margin = 10;
+	const margin = PDF_MARGIN_MM;
 	const pageWidth = pdf.internal.pageSize.getWidth();
 	const pageHeight = pdf.internal.pageSize.getHeight();
 	const usableW = pageWidth - margin * 2;
 	const usableH = pageHeight - margin * 2;
 
-	for (let i = 0; i < pages.length; i++) {
-		const canvas = await html2canvas(pages[i], {
-			scale,
+	let pdfPageIndex = 0;
+
+	for (const pageEl of pages) {
+		const targetHeightPx =
+			pageEl.getBoundingClientRect().width * (usableH / usableW) * FIT_HEIGHT_SAFETY;
+		const saved = await applyLayoutScale(pageEl, targetHeightPx, fitSinglePage);
+		const canvas = await html2canvas(pageEl, {
+			scale: renderScale,
 			backgroundColor: '#ffffff',
 			useCORS: true,
 			logging: false
 		});
-		const imgData =
-			imageFormat === 'jpeg'
-				? canvas.toDataURL('image/jpeg', jpegQuality)
-				: canvas.toDataURL('image/png');
-		const ratio = canvas.height / canvas.width;
-		const w = usableW;
-		const h = Math.min(w * ratio, usableH);
-		if (i > 0) pdf.addPage();
-		pdf.addImage(imgData, imageFormat === 'jpeg' ? 'JPEG' : 'PNG', margin, margin, w, h);
+		restoreStyles(pageEl, saved);
+
+		const slicePxHeight = canvas.width * (usableH / usableW);
+		const slices: HTMLCanvasElement[] = [];
+
+		if (canvas.height <= slicePxHeight + 1) {
+			slices.push(canvas);
+		} else {
+			let offsetY = 0;
+			while (offsetY < canvas.height) {
+				const sliceHeight = Math.min(slicePxHeight, canvas.height - offsetY);
+				const slice = document.createElement('canvas');
+				slice.width = canvas.width;
+				slice.height = sliceHeight;
+				const ctx = slice.getContext('2d');
+				if (!ctx) throw new Error('Kunne ikke oprette canvas-context til PDF-slice');
+				ctx.drawImage(canvas, 0, -offsetY);
+				slices.push(slice);
+				offsetY += sliceHeight;
+			}
+		}
+
+		for (const slice of slices) {
+			const imgData =
+				imageFormat === 'jpeg'
+					? slice.toDataURL('image/jpeg', jpegQuality)
+					: slice.toDataURL('image/png');
+			const w = usableW;
+			const h = w * (slice.height / slice.width);
+			if (pdfPageIndex > 0) pdf.addPage();
+			pdf.addImage(imgData, imageFormat === 'jpeg' ? 'JPEG' : 'PNG', margin, margin, w, h);
+			pdfPageIndex++;
+		}
 	}
 
 	pdf.save(opts.filename.endsWith('.pdf') ? opts.filename : `${opts.filename}.pdf`);
@@ -92,6 +187,7 @@ export async function exportSongsAsPdf(
 	wrapper.style.background = '#ffffff';
 	wrapper.style.color = '#000000';
 	wrapper.style.zIndex = '-1';
+	wrapper.classList.add('pdf-snapshot-page');
 	if (opts.withBassTabs === false) wrapper.classList.add('no-bass-tabs');
 	document.body.appendChild(wrapper);
 
@@ -100,7 +196,8 @@ export async function exportSongsAsPdf(
 	for (const song of songs) {
 		const pageDiv = document.createElement('div');
 		pageDiv.style.background = '#ffffff';
-		pageDiv.style.padding = '6mm 8mm';
+		pageDiv.style.padding = OFFSCREEN_PAGE_PADDING;
+		pageDiv.classList.add('pdf-snapshot-page');
 		wrapper.appendChild(pageDiv);
 		const c = mount(PrintableSong, { target: pageDiv, props: { song } });
 		components.push(c);
@@ -130,5 +227,10 @@ export async function exportExistingPagesAsPdf(
 	opts: ExportOptions
 ): Promise<void> {
 	if (pages.length === 0) return;
-	await pagesToPdf(pages, opts);
+	for (const page of pages) page.classList.add('pdf-snapshot-page');
+	try {
+		await pagesToPdf(pages, opts);
+	} finally {
+		for (const page of pages) page.classList.remove('pdf-snapshot-page');
+	}
 }

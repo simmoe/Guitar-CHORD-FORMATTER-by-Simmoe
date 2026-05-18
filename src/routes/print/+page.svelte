@@ -35,22 +35,7 @@
 
 	// Forvælgere — gemmes IKKE; kun aktive for det aktuelle print-besøg.
 	let withBassTabs = $state(true);
-
-	function doPrint() {
-		// Tving document.title til bookTitle i selve print-øjeblikket — det
-		// er denne titel browseren bruger som default PDF-filnavn.
-		// Vi gemmer den oprindelige og putter den tilbage efter dialogen
-		// er lukket.
-		const prev = document.title;
-		document.title = bookTitle;
-		window.print();
-		// onafterprint fyrer i moderne browsere når print-dialog er lukket.
-		const restore = () => {
-			document.title = prev;
-			window.removeEventListener('afterprint', restore);
-		};
-		window.addEventListener('afterprint', restore);
-	}
+	let fitSinglePage = $state(true);
 
 	let pdfBusy = $state(false);
 
@@ -61,7 +46,8 @@
 			const pages = Array.from(document.querySelectorAll<HTMLElement>('.print-page'));
 			await exportExistingPagesAsPdf(pages, {
 				filename: bookTitle,
-				withBassTabs
+				withBassTabs,
+				fitSinglePage
 			});
 		} catch (err) {
 			console.error('PDF-eksport fejlede:', err);
@@ -92,6 +78,13 @@
 			<input type="checkbox" bind:checked={withBassTabs} />
 			Inkludér bass tabs
 		</label>
+		<label
+			class="print-toggle"
+			title="Skalér hver sang proportionalt så den fylder maks én A4-side"
+		>
+			<input type="checkbox" bind:checked={fitSinglePage} />
+			Hold sang på en side
+		</label>
 		<button
 			type="button"
 			class="btn-secondary"
@@ -100,9 +93,6 @@
 			title="Generér PDF og hent direkte"
 		>
 			{pdfBusy ? 'Genererer…' : 'Hent PDF'}
-		</button>
-		<button type="button" class="btn-primary" onclick={doPrint} disabled={filtered.length === 0}>
-			Print
 		</button>
 	</div>
 </header>

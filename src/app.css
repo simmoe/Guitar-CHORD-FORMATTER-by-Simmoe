@@ -270,6 +270,136 @@ select {
 	grid-template-columns: 2.6em minmax(0, 1fr) !important;
 }
 
+/* PDF-snapshot: udnyt A4-arealet. Den normale card-padding er rar på
+ * skærm, men i raster-PDF'en tæller hver millimeter. */
+.pdf-snapshot-page.print-page,
+.pdf-snapshot-page .print-page {
+	--pdf-layout-scale: 1;
+	margin-bottom: 0 !important;
+	padding: 0 !important;
+	border-radius: 0 !important;
+}
+.pdf-snapshot-page.print-page .chord-grid,
+.pdf-snapshot-page .print-page .chord-grid {
+	grid-template-columns: minmax(0, 145mm) max-content !important;
+	column-gap: 10mm !important;
+	justify-content: start !important;
+	grid-auto-flow: row !important;
+	direction: ltr !important;
+	width: auto !important;
+}
+.pdf-snapshot-page.print-page .lyrics-cell,
+.pdf-snapshot-page .print-page .lyrics-cell {
+	grid-column: 1 !important;
+}
+.pdf-snapshot-page.print-page .rhythm-cell,
+.pdf-snapshot-page .print-page .rhythm-cell {
+	grid-column: 2 !important;
+}
+.print-song-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: calc(0.9rem * var(--pdf-layout-scale)) !important;
+	padding-bottom: calc(0.55rem * var(--pdf-layout-scale)) !important;
+}
+.print-song-header h2 {
+	min-width: 0;
+	flex: 1 1 auto;
+	line-height: 1.05;
+	font-size: calc(1.5rem * var(--pdf-layout-scale));
+}
+.print-song-meta {
+	flex: 0 0 auto;
+	white-space: nowrap;
+	font-size: calc(0.875rem * var(--pdf-layout-scale));
+}
+.pdf-song-sections {
+	display: grid;
+	gap: calc(0.16cm * var(--pdf-layout-scale));
+}
+.pdf-song-section {
+	--section-accent: #6b7280;
+	position: relative;
+	border: 0.75pt solid var(--section-accent);
+	border-radius: 7px;
+	margin-top: calc(0.06cm * var(--pdf-layout-scale));
+	padding: calc(0.16cm * var(--pdf-layout-scale)) calc(0.22cm * var(--pdf-layout-scale)) calc(0.14cm * var(--pdf-layout-scale));
+	break-inside: avoid;
+	background: transparent;
+}
+.pdf-song-section--compact {
+	margin-top: 0;
+	min-height: 0;
+	padding: calc(0.08cm * var(--pdf-layout-scale)) calc(0.22cm * var(--pdf-layout-scale)) !important;
+}
+.pdf-song-section--unlabeled {
+	padding-top: calc(0.12cm * var(--pdf-layout-scale));
+}
+.pdf-song-section--compact .pdf-section-label {
+	position: static;
+	display: inline-block;
+	transform: none;
+	background: transparent;
+	padding: 0;
+}
+.pdf-section-label {
+	position: absolute;
+	top: -0.58em;
+	left: 0.28cm;
+	background: #ffffff;
+	color: var(--section-accent);
+	padding: 0 0.34rem;
+	font-size: calc(8pt * var(--pdf-layout-scale));
+	line-height: 1;
+	font-weight: 800;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+}
+.pdf-section-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 145mm) max-content;
+	column-gap: calc(10mm * var(--pdf-layout-scale));
+	align-items: baseline;
+}
+.pdf-line,
+.pdf-bass {
+	min-width: 0;
+	white-space: pre;
+}
+.pdf-chord,
+.pdf-bass {
+	font-family: var(--font-mono);
+	font-size: calc(8.5pt * var(--pdf-layout-scale));
+	line-height: calc(1.1 * var(--pdf-layout-scale));
+}
+.pdf-chord .bass-chord {
+	color: var(--color-chord);
+	font-weight: 400;
+}
+.pdf-spacer {
+	letter-spacing: 0;
+	user-select: none;
+}
+.pdf-lyric {
+	font-size: calc(9.2pt * var(--pdf-layout-scale));
+	line-height: calc(1.12 * var(--pdf-layout-scale));
+	font-weight: 700;
+}
+.pdf-line--blank {
+	min-height: calc(0.14cm * var(--pdf-layout-scale));
+}
+.pdf-song-section--intro { --section-accent: #0d47a1; }
+.pdf-song-section--verse { --section-accent: #1b5e20; }
+.pdf-song-section--pre-chorus { --section-accent: #8d6e00; }
+.pdf-song-section--chorus { --section-accent: #b71c1c; }
+.pdf-song-section--bridge { --section-accent: #b3501a; }
+.pdf-song-section--solo { --section-accent: #6c5b00; }
+.pdf-song-section--interlude { --section-accent: #0d6e63; }
+.pdf-song-section--outro { --section-accent: #4527a0; }
+.pdf-song-section--coda { --section-accent: #4e342e; }
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Print-styles
  * Mål: hver sang fylder MAKS én A4-side. Vi skjuler navigation/toolbar og

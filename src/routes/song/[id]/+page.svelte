@@ -216,17 +216,24 @@
 	}
 
 	let withBassTabs = $state(true);
+	let fitSinglePage = $state(true);
 
-	function handlePrint() {
-		const prev = document.title;
-		document.title = title.trim() || song?.title || 'Sang';
-		window.print();
-		const restore = () => {
-			document.title = prev;
-			window.removeEventListener('afterprint', restore);
-		};
-		window.addEventListener('afterprint', restore);
-	}
+	const liveSongForExport = $derived<SongDoc | null>(
+		song
+			? ({
+					...song,
+					title: title.trim() || song.title,
+					artist: artist.trim() || song.artist,
+					key: key.trim() || song.key,
+					barsPerLine,
+					categories,
+					rows,
+					rawInput: serializeRows(rows),
+					bassLines,
+					collapsedSections
+				} as SongDoc)
+			: null
+	);
 
 	let pdfBusy = $state(false);
 
@@ -235,21 +242,11 @@
 		await flushPendingSave();
 		pdfBusy = true;
 		try {
-			const liveSong: SongDoc = {
-				...song,
-				title: title.trim() || song.title,
-				artist: artist.trim() || song.artist,
-				key: key.trim() || song.key,
-				barsPerLine,
-				categories,
-				rows,
-				rawInput: serializeRows(rows),
-				bassLines,
-				collapsedSections
-			};
-			await exportSongsAsPdf([liveSong], {
+			if (!liveSongForExport) return;
+			await exportSongsAsPdf([liveSongForExport], {
 				filename: title.trim() || song.title || 'Sang',
-				withBassTabs
+				withBassTabs,
+				fitSinglePage
 			});
 		} catch (err) {
 			console.error('PDF-eksport fejlede:', err);
@@ -349,6 +346,13 @@
 						<input type="checkbox" bind:checked={withBassTabs} />
 						Bass tabs
 					</label>
+					<label
+						class="print-toggle"
+						title="Skalér sangen proportionalt så den fylder maks én A4-side"
+					>
+						<input type="checkbox" bind:checked={fitSinglePage} />
+						Hold sang på en side
+					</label>
 					<button
 						type="button"
 						class="btn-secondary"
@@ -358,7 +362,6 @@
 					>
 						{pdfBusy ? 'Genererer…' : 'PDF'}
 					</button>
-					<button type="button" class="btn-secondary" onclick={handlePrint}>Print</button>
 					<button
 						type="button"
 						class="btn-secondary !text-[var(--color-error)]"
