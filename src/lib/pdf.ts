@@ -23,6 +23,7 @@ interface ExportOptions {
 	filename: string;
 	withBassTabs?: boolean;
 	scale?: number;
+	imageFormat?: 'png' | 'jpeg';
 	jpegQuality?: number;
 }
 
@@ -31,9 +32,15 @@ interface ExportOptions {
  * trigger download. Hver side skaleres så den fylder A4'eren bredde med
  * 10mm margin og clipper hvis indholdet er for højt (sjældent for
  * chord-sheets).
+ *
+ * Default: PNG ved scale 3. Det er lossless og giver skarp tekst i
+ * stedet for JPEG-komprimeringens "udvaskede" snapshot-look. Filerne
+ * bliver lidt større, men chord-sheets fylder typisk fortsat under 2 MB
+ * pr. side.
  */
 async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<void> {
-	const scale = opts.scale ?? 2;
+	const scale = opts.scale ?? 3;
+	const imageFormat = opts.imageFormat ?? 'png';
 	const jpegQuality = opts.jpegQuality ?? 0.92;
 
 	const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -50,12 +57,15 @@ async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<vo
 			useCORS: true,
 			logging: false
 		});
-		const imgData = canvas.toDataURL('image/jpeg', jpegQuality);
+		const imgData =
+			imageFormat === 'jpeg'
+				? canvas.toDataURL('image/jpeg', jpegQuality)
+				: canvas.toDataURL('image/png');
 		const ratio = canvas.height / canvas.width;
 		const w = usableW;
 		const h = Math.min(w * ratio, usableH);
 		if (i > 0) pdf.addPage();
-		pdf.addImage(imgData, 'JPEG', margin, margin, w, h);
+		pdf.addImage(imgData, imageFormat === 'jpeg' ? 'JPEG' : 'PNG', margin, margin, w, h);
 	}
 
 	pdf.save(opts.filename.endsWith('.pdf') ? opts.filename : `${opts.filename}.pdf`);
