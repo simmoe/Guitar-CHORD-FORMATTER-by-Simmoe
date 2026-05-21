@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { authState } from '$lib/auth.svelte';
 	import { BAND } from '$lib/data/band';
@@ -20,6 +21,9 @@
 	let search = $state('');
 	let categoryColorMap = $state<CategoryColorMap>({});
 	let pdfBusy = $state(false);
+	let restoredSessionSelection = $state(false);
+
+	const SONGBOOK_SESSION_SELECTION_KEY = 'faellesbandet.songbook.session-selection';
 
 	$effect(() => {
 		if (!authState.loading && !authState.user) goto('/login');
@@ -50,6 +54,28 @@
 	const effectiveCategoryColorMap = $derived(
 		assignMissingCategoryColors(categories, categoryColorMap)
 	);
+
+	$effect(() => {
+		if (!browser || restoredSessionSelection) return;
+		restoredSessionSelection = true;
+		const raw = sessionStorage.getItem(SONGBOOK_SESSION_SELECTION_KEY);
+		if (!raw) return;
+		try {
+			const saved = JSON.parse(raw) as { activeCategory?: string | null; printCategory?: string };
+			activeCategory = saved.activeCategory ?? null;
+			printCategory = saved.printCategory ?? saved.activeCategory ?? '';
+		} catch {
+			sessionStorage.removeItem(SONGBOOK_SESSION_SELECTION_KEY);
+		}
+	});
+
+	$effect(() => {
+		if (!browser || !restoredSessionSelection) return;
+		sessionStorage.setItem(
+			SONGBOOK_SESSION_SELECTION_KEY,
+			JSON.stringify({ activeCategory, printCategory })
+		);
+	});
 
 	$effect(() => {
 		if (!authState.user || categories.length === 0) return;

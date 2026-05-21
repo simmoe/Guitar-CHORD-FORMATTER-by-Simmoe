@@ -5,7 +5,7 @@
  * funktioner som `oklch()` — Tailwind v4 bruger dem) til at rasterisere
  * hver "side" til en canvas, og pakker dem i en jsPDF.
  *
- * Output bliver et raster-PDF (1-2 MB pr. A4-side ved scale=2). Tekst
+ * Output bliver et raster-PDF. Tekst
  * er ikke selectable, men chord-grid'et og typografien gengives 1:1
  * med skærm-renderingen — netop det vi vil have.
  *
@@ -33,6 +33,8 @@ const MAX_LAYOUT_SCALE = 1.45;
 const FIT_HEIGHT_SAFETY = 0.995;
 const PDF_MARGIN_MM = 5;
 const OFFSCREEN_PAGE_PADDING = '2mm 3mm';
+const DEFAULT_RENDER_SCALE = 2;
+const DEFAULT_JPEG_QUALITY = 0.82;
 
 interface SavedStyles {
 	el: HTMLElement;
@@ -46,6 +48,20 @@ interface SliceBounds {
 
 function clamp(n: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, n));
+}
+
+function safePdfFilename(filename: string): string {
+	const base = filename
+		.normalize('NFKD')
+		.replace(/[\u0300-\u036f]/g, '')
+		.replace(/['’`´]/g, '')
+		.replace(/[^a-zA-Z0-9æøåÆØÅ._ -]+/g, '-')
+		.replace(/\s+/g, ' ')
+		.replace(/-+/g, '-')
+		.trim()
+		.replace(/^[.\- ]+|[.\- ]+$/g, '');
+	const withExtension = base || 'sangbog';
+	return withExtension.toLowerCase().endsWith('.pdf') ? withExtension : `${withExtension}.pdf`;
 }
 
 function restoreStyles(el: HTMLElement, saved: SavedStyles): void {
@@ -158,12 +174,13 @@ function makeSliceBounds(
  * og lange sange kan krympe inden snapshot. Hvis indholdet stadig er for
  * højt efter minimumsskalaen, deles snapshot'et over flere A4-sider.
  *
- * Default-output er PNG ved scale 3 — lossless og skarpt.
+ * Default-output er JPEG ved scale 2. Det holder sangbøger i en rimelig
+ * størrelse; kaldere kan stadig vælge PNG ved behov.
  */
 async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<void> {
-	const renderScale = opts.scale ?? 3;
-	const imageFormat = opts.imageFormat ?? 'png';
-	const jpegQuality = opts.jpegQuality ?? 0.92;
+	const renderScale = opts.scale ?? DEFAULT_RENDER_SCALE;
+	const imageFormat = opts.imageFormat ?? 'jpeg';
+	const jpegQuality = opts.jpegQuality ?? DEFAULT_JPEG_QUALITY;
 
 	const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 	const margin = PDF_MARGIN_MM;
@@ -218,7 +235,7 @@ async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<vo
 		}
 	}
 
-	pdf.save(opts.filename.endsWith('.pdf') ? opts.filename : `${opts.filename}.pdf`);
+	pdf.save(safePdfFilename(opts.filename));
 }
 
 /**
