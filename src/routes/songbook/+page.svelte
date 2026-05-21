@@ -2,9 +2,15 @@
 	import { goto } from '$app/navigation';
 	import { authState } from '$lib/auth.svelte';
 	import { BAND } from '$lib/data/band';
-	import { subscribeSongs } from '$lib/firebase/songs';
+	import { saveCategoryColors, subscribeCategoryColors, subscribeSongs } from '$lib/firebase/songs';
 	import { uniqueCategoriesFromSongs } from '$lib/chordFormatter';
-	import type { SongDoc } from '$lib/types';
+	import { exportSongsAsPdf } from '$lib/pdf';
+	import {
+		assignMissingCategoryColors,
+		colorForCategory as paletteColorForCategory,
+		hasSameCategoryColors
+	} from '$lib/categoryColors';
+	import type { CategoryColorMap, SongDoc } from '$lib/types';
 
 	let songs = $state<SongDoc[]>([]);
 	let loadingSongs = $state(true);
@@ -12,6 +18,8 @@
 	let activeCategory = $state<string | null>(null); // null = alle (filter)
 	let printCategory = $state<string>(''); // '' = hele sangbogen
 	let search = $state('');
+	let categoryColorMap = $state<CategoryColorMap>({});
+	let pdfBusy = $state(false);
 
 	$effect(() => {
 		if (!authState.loading && !authState.user) goto('/login');
@@ -32,7 +40,27 @@
 		return () => unsub();
 	});
 
+	$effect(() => {
+		if (!authState.user) return;
+		const unsub = subscribeCategoryColors((colors) => (categoryColorMap = colors));
+		return () => unsub();
+	});
+
 	const categories = $derived(uniqueCategoriesFromSongs(songs));
+	const effectiveCategoryColorMap = $derived(
+		assignMissingCategoryColors(categories, categoryColorMap)
+	);
+
+	$effect(() => {
+		if (!authState.user || categories.length === 0) return;
+		if (!hasSameCategoryColors(effectiveCategoryColorMap, categoryColorMap)) {
+			void saveCategoryColors(effectiveCategoryColorMap);
+		}
+	});
+
+	function colorForCategory(cat: string) {
+		return paletteColorForCategory(cat, effectiveCategoryColorMap);
+	}
 
 	const filteredSongs = $derived.by(() => {
 		const q = search.trim().toLowerCase();
@@ -52,15 +80,35 @@
 		goto('/login');
 	}
 
-	function handlePdfBook() {
-		const params = new URLSearchParams();
-		if (printCategory) params.set('category', printCategory);
-		goto(`/print?${params.toString()}`);
+	async function handlePdfBook() {
+		if (pdfBusy || printSongs.length === 0) return;
+		pdfBusy = true;
+		try {
+			await exportSongsAsPdf(printSongs, {
+				filename: printCategory || `${BAND.name}s sangbog`,
+				withBassTabs: true
+			});
+		} catch (err) {
+			console.error('PDF-eksport fejlede:', err);
+			alert('Kunne ikke generere PDF — se konsollen for detaljer.');
+		} finally {
+			pdfBusy = false;
+		}
+	}
+
+	function selectSongbookCategory(cat: string | null): void {
+		activeCategory = cat;
+		printCategory = cat ?? '';
 	}
 
 	const printCount = $derived.by(() => {
 		if (!printCategory) return songs.length;
 		return songs.filter((s) => (s.categories ?? []).includes(printCategory)).length;
+	});
+
+	const printSongs = $derived.by(() => {
+		if (!printCategory) return songs;
+		return songs.filter((s) => (s.categories ?? []).includes(printCategory));
 	});
 </script>
 
@@ -117,7 +165,7 @@
 				class="btn-secondary"
 				style="padding: 1rem 1.25rem;"
 				onclick={handlePdfBook}
-				disabled={printCount === 0}
+				disabled={printCount === 0 || pdfBusy}
 				aria-label={printCategory
 					? `Lav PDF for kategorien ${printCategory}`
 					: 'Lav PDF for hele sangbogen'}
@@ -137,7 +185,7 @@
 						d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"
 					></path><rect x="6" y="14" width="12" height="8"></rect></svg
 				>
-				PDF
+				{pdfBusy ? 'Genererer…' : 'PDF'}
 			</button>
 		</div>
 
@@ -157,17 +205,21 @@
 			type="button"
 			class="cat-chip"
 			class:active={activeCategory === null}
-			onclick={() => (activeCategory = null)}
+			onclick={() => selectSongbookCategory(null)}
 		>
 			Alle ({songs.length})
 		</button>
 		{#each categories as cat (cat)}
 			{@const count = songs.filter((s) => (s.categories ?? []).includes(cat)).length}
+			{@const c = colorForCategory(cat)}
 			<button
 				type="button"
 				class="cat-chip"
 				class:active={activeCategory === cat}
-				onclick={() => (activeCategory = cat)}
+				style:--chip-bg={c.bg}
+				style:--chip-text={c.text}
+				style:--chip-border={c.border}
+				onclick={() => selectSongbookCategory(cat)}
 			>
 				{cat} ({count})
 			</button>
@@ -220,7 +272,13 @@
 								{song.barsPerLine} takter
 							</span>
 							{#each song.categories ?? [] as cat (cat)}
-								<span class="cat-pill">{cat}</span>
+								{@const c = colorForCategory(cat)}
+								<span
+									class="cat-pill"
+									style:background={c.bg}
+									style:color={c.text}
+									style:border-color={c.border}
+								>{cat}</span>
 							{/each}
 						</div>
 					</a>
@@ -234,20 +292,22 @@
 	.cat-chip {
 		padding: 0.4rem 0.85rem;
 		border-radius: 999px;
-		border: 1px solid var(--color-border);
-		background: rgba(255, 255, 255, 0.04);
-		color: var(--color-ink-on-dark);
+		border: 1px solid var(--chip-border, var(--color-border));
+		background: var(--chip-bg, rgba(255, 255, 255, 0.04));
+		color: var(--chip-text, var(--color-ink-on-dark));
 		font-size: 0.85rem;
-		font-weight: 500;
-		transition: background 120ms ease, border-color 120ms ease;
+		font-weight: 600;
+		transition: filter 120ms ease, transform 120ms ease;
 	}
 	.cat-chip:hover {
-		background: rgba(255, 255, 255, 0.1);
+		filter: brightness(0.96);
+		transform: translateY(-1px);
 	}
 	.cat-chip.active {
 		background: var(--color-accent);
 		color: #ffffff;
 		border-color: var(--color-accent);
+		box-shadow: 0 4px 12px rgba(217, 119, 6, 0.25);
 	}
 	.song-card {
 		transition: transform 120ms ease, box-shadow 120ms ease;
@@ -264,11 +324,12 @@
 		font-weight: 500;
 	}
 	.cat-pill {
-		padding: 0.15rem 0.5rem;
+		padding: 0.15rem 0.55rem;
 		border-radius: 999px;
 		background: var(--color-accent-soft);
 		color: #92400e;
-		font-weight: 600;
+		font-weight: 700;
+		border: 1px solid transparent;
 	}
 	.print-group {
 		display: inline-flex;

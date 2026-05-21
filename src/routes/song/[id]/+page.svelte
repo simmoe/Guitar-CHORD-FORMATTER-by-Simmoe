@@ -6,6 +6,8 @@
 	import {
 		deleteSong,
 		getSong,
+		saveCategoryColors,
+		subscribeCategoryColors,
 		subscribeSongs,
 		updateSong
 	} from '$lib/firebase/songs';
@@ -19,8 +21,10 @@
 	import EditableSong from '$lib/components/EditableSong.svelte';
 	import SongMetaForm from '$lib/components/SongMetaForm.svelte';
 	import { exportSongsAsPdf } from '$lib/pdf';
+	import { assignMissingCategoryColors, hasSameCategoryColors } from '$lib/categoryColors';
 	import type {
 		BassLines,
+		CategoryColorMap,
 		CollapsedSections,
 		SongDoc
 	} from '$lib/types';
@@ -41,6 +45,8 @@
 	let rows = $state<Row[]>([]);
 	let bassLines = $state<BassLines>({});
 	let collapsedSections = $state<CollapsedSections>([]);
+	let categoryColorMap = $state<CategoryColorMap>({});
+	let fitSinglePage = $state(true);
 
 	let allSongs = $state<SongDoc[]>([]);
 	$effect(() => {
@@ -49,6 +55,22 @@
 		return () => unsub();
 	});
 	const knownCategories = $derived(uniqueCategoriesFromSongs(allSongs));
+	const effectiveCategoryColorMap = $derived(
+		assignMissingCategoryColors(knownCategories, categoryColorMap)
+	);
+
+	$effect(() => {
+		if (!authState.user) return;
+		const unsub = subscribeCategoryColors((colors) => (categoryColorMap = colors));
+		return () => unsub();
+	});
+
+	$effect(() => {
+		if (!authState.user || knownCategories.length === 0) return;
+		if (!hasSameCategoryColors(effectiveCategoryColorMap, categoryColorMap)) {
+			void saveCategoryColors(effectiveCategoryColorMap);
+		}
+	});
 
 	$effect(() => {
 		const id = $page.params.id;
@@ -70,6 +92,7 @@
 				rows = [...(s.rows ?? parseRows(s.rawInput ?? ''))];
 				bassLines = { ...(s.bassLines ?? {}) };
 				collapsedSections = [...(s.collapsedSections ?? [])];
+				fitSinglePage = s.fitSinglePage ?? true;
 			})
 			.catch((err) => (loadError = err instanceof Error ? err.message : 'Ukendt fejl'))
 			.finally(() => (loading = false));
@@ -113,6 +136,7 @@
 				rawInput: serializeRows(rows),
 				bassLines,
 				collapsedSections,
+				fitSinglePage,
 				schemaVersion: 4
 			};
 			await updateSong(song.id, patch, authState.user.uid);
@@ -216,7 +240,6 @@
 	}
 
 	let withBassTabs = $state(true);
-	let fitSinglePage = $state(true);
 
 	const liveSongForExport = $derived<SongDoc | null>(
 		song
@@ -230,7 +253,8 @@
 					rows,
 					rawInput: serializeRows(rows),
 					bassLines,
-					collapsedSections
+					collapsedSections,
+					fitSinglePage
 				} as SongDoc)
 			: null
 	);
@@ -350,7 +374,7 @@
 						class="print-toggle"
 						title="Skalér sangen proportionalt så den fylder maks én A4-side"
 					>
-						<input type="checkbox" bind:checked={fitSinglePage} />
+						<input type="checkbox" bind:checked={fitSinglePage} onchange={() => scheduleSave()} />
 						Hold sang på en side
 					</label>
 					<button
@@ -395,6 +419,7 @@
 						{barsPerLine}
 						{categories}
 						{knownCategories}
+						categoryColors={effectiveCategoryColorMap}
 						onChange={onMetaChange}
 					/>
 				</div>

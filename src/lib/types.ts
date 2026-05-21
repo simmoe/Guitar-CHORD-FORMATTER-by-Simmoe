@@ -26,6 +26,14 @@ export interface BandDoc {
  */
 export type BassLines = Record<string, string>;
 
+export interface CategoryColor {
+	bg: string;
+	text: string;
+	border: string;
+}
+
+export type CategoryColorMap = Record<string, CategoryColor>;
+
 /**
  * Sektioner (Verse, Chorus, …) brugeren har klappet sammen. Identificeret
  * via headerens 0-baserede index i sangens header-liste.
@@ -52,6 +60,8 @@ export interface SongDoc {
 	barsPerLine: 2 | 4 | 8;
 	bassLines?: BassLines;
 	collapsedSections?: CollapsedSections;
+	/** Om PDF-export som udgangspunkt skal skalere sangen til maks én A4-side. */
+	fitSinglePage?: boolean;
 	categories?: string[];
 	sourceUrl?: string;
 	notes?: string;

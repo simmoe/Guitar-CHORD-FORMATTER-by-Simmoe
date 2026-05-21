@@ -14,13 +14,14 @@ import {
 	onSnapshot,
 	orderBy,
 	query,
+	setDoc,
 	serverTimestamp,
 	updateDoc,
 	type Unsubscribe
 } from 'firebase/firestore';
 import { getDb, COL } from './client';
 import { BAND } from '$lib/data/band';
-import type { SongDoc } from '$lib/types';
+import type { CategoryColorMap, SongDoc } from '$lib/types';
 import { decodeHtmlEntities } from '$lib/chordFormatter';
 import { migrateSong } from '$lib/migrate';
 import type { Row } from '$lib/songParse';
@@ -31,6 +32,10 @@ function songsCol() {
 
 function songRef(id: string) {
 	return doc(getDb(), COL.bands, BAND.id, COL.songs, id);
+}
+
+function settingsRef(id: string) {
+	return doc(getDb(), COL.bands, BAND.id, 'settings', id);
 }
 
 /**
@@ -102,4 +107,19 @@ export async function updateSong(
 
 export async function deleteSong(id: string): Promise<void> {
 	await deleteDoc(songRef(id));
+}
+
+export function subscribeCategoryColors(
+	cb: (colors: CategoryColorMap) => void,
+	onError?: (err: Error) => void
+): Unsubscribe {
+	return onSnapshot(
+		settingsRef('categoryColors'),
+		(snap) => cb((snap.data()?.colors ?? {}) as CategoryColorMap),
+		(err) => onError?.(err)
+	);
+}
+
+export async function saveCategoryColors(colors: CategoryColorMap): Promise<void> {
+	await setDoc(settingsRef('categoryColors'), { colors }, { merge: true });
 }

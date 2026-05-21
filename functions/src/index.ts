@@ -9,7 +9,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { fetchUg } from './ug';
+import { fetchUg, type UgFetchErrorDetails } from './ug';
 
 if (getApps().length === 0) initializeApp();
 setGlobalOptions({ region: 'europe-west1', maxInstances: 5 });
@@ -48,7 +48,8 @@ export const fetchUgTab = onCall<FetchUgRequest>(
 			return result;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : 'Ukendt fejl';
-			throw new HttpsError('internal', msg);
+			const details = (err as { details?: UgFetchErrorDetails }).details;
+			throw new HttpsError('internal', msg, details);
 		}
 	}
 );

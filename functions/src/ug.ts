@@ -55,7 +55,27 @@ export interface UgSearchHit {
 	votes: number;
 }
 
+/**
+ * Detaljer vi vedhæfter en thrown Error (og som propageres til klienten
+ * via HttpsError.details) så fallback-UI kan åbne den rigtige UG-side.
+ */
+export interface UgFetchErrorDetails {
+	stage: 'search' | 'tab' | 'no-hits';
+	searchUrl?: string;
+	tabUrl?: string;
+}
+
 const UG_URL_REGEX = /^https?:\/\/(www\.)?(tabs\.)?ultimate-guitar\.com\//i;
+
+function buildSearchUrl(query: string): string {
+	return `https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(query)}`;
+}
+
+function attachDetails(err: unknown, details: UgFetchErrorDetails): Error {
+	const e = err instanceof Error ? err : new Error(String(err));
+	(e as Error & { details?: UgFetchErrorDetails }).details = details;
+	return e;
+}
 
 /** Hovedfunktionen kaldt fra fetchUgTab callable. */
 export async function fetchUg(input: string): Promise<UgFetchResult> {
@@ -63,28 +83,115 @@ export async function fetchUg(input: string): Promise<UgFetchResult> {
 	if (!trimmed) throw new Error('Empty input');
 
 	if (UG_URL_REGEX.test(trimmed)) {
-		return fetchTabPage(trimmed);
+		try {
+			return await fetchTabPage(trimmed);
+		} catch (err) {
+			throw attachDetails(err, { stage: 'tab', tabUrl: trimmed });
+		}
 	}
 
-	const { hits, searchUrl } = await searchUg(trimmed);
-	if (hits.length === 0) {
-		throw new Error('Ingen akkord-resultater fundet på Ultimate Guitar');
+	// To-trins søgning: UG's egen først (giver rating/votes for kvalitets-vægtning),
+	// derefter DuckDuckGo's no-JS HTML som backup (giver bare URL'er, men kommer
+	// igennem fordi DDG ikke er Cloudflare-beskyttet — UG's egen søgeside får
+	// challenge i ~50% af tilfældene lige nu).
+	let hits: UgSearchHit[] = [];
+	let searchUrl = buildSearchUrl(trimmed);
+	try {
+		const r = await searchUg(trimmed);
+		hits = r.hits;
+		searchUrl = r.searchUrl;
+	} catch {
+		// UG-søgning fejlede — fald gennem til DDG-fallback nedenfor
 	}
-	// Vælg den med flest stemmer (rating × votes-vægtning).
-	const best = hits.sort(
+	if (hits.length === 0) {
+		try {
+			hits = await searchUgViaDuckDuckGo(trimmed);
+		} catch (err) {
+			throw attachDetails(err, { stage: 'search', searchUrl });
+		}
+	}
+	if (hits.length === 0) {
+		throw attachDetails(
+			new Error('Ingen akkord-resultater fundet på Ultimate Guitar'),
+			{ stage: 'no-hits', searchUrl }
+		);
+	}
+	const ranked = hits.sort(
 		(a, b) =>
 			b.rating * Math.log10(b.votes + 1) - a.rating * Math.log10(a.votes + 1)
-	)[0];
-	return fetchTabPage(best.url, searchUrl);
+	);
+	let lastErr: unknown = null;
+	for (const hit of ranked.slice(0, 5)) {
+		try {
+			return await fetchTabPage(hit.url, searchUrl);
+		} catch (err) {
+			lastErr = err;
+			// Næste search-hit kan være en anden version af samme sang hvor Jina's
+			// cached/rendered state faktisk kommer igennem Cloudflare.
+		}
+	}
+	throw attachDetails(lastErr ?? new Error('Ingen UG-tab kunne hentes'), {
+		stage: 'tab',
+		tabUrl: ranked[0]?.url,
+		searchUrl
+	});
+}
+
+/**
+ * Backup-søgning når UG's egen søgeside er blokeret af Cloudflare.
+ * Bruger DuckDuckGo's no-JS HTML-frontend (`html.duckduckgo.com`) som
+ * returnerer rene tab-URL'er — den er ikke Cloudflare-beskyttet og kommer
+ * direkte igennem fra Cloud Functions IPs.
+ */
+async function searchUgViaDuckDuckGo(query: string): Promise<UgSearchHit[]> {
+	const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(
+		'site:ultimate-guitar.com chords ' + query
+	)}`;
+	const res = await fetch(url, {
+		headers: { 'User-Agent': UG_HEADERS['User-Agent'] },
+		redirect: 'follow'
+	});
+	if (!res.ok) {
+		throw new Error(`DuckDuckGo backup-søgning HTTP ${res.status}`);
+	}
+	const html = await res.text();
+
+	// DDG wrapper deres ydre links som /l/?uddg=<URL-encoded ægte URL>.
+	// Vi udtrækker både direkte og wrapped URL'er, dedupe'r og holder
+	// rækkefølgen (DDG rangordner allerede efter relevans).
+	const seen = new Set<string>();
+	const hits: UgSearchHit[] = [];
+	const RX = /(?:uddg=|href="https?:\/\/)?(tabs\.ultimate-guitar\.com\/tab\/[a-z0-9-]+\/[a-z0-9-]+-chords-\d+)/gi;
+	let m: RegExpExecArray | null;
+	while ((m = RX.exec(html)) !== null) {
+		let path = m[1];
+		// uddg-versionen er URL-encoded; URL-decode en gang er nok her
+		try {
+			path = decodeURIComponent(path);
+		} catch {
+			// ikke encoded — brug som-er
+		}
+		const tabUrl = path.startsWith('http') ? path : `https://${path}`;
+		if (seen.has(tabUrl)) continue;
+		seen.add(tabUrl);
+		hits.push({
+			title: '',
+			artist: '',
+			url: tabUrl,
+			// DDG giver os ikke rating/votes — vægt alle ens men prioritér rækkefølgen
+			rating: 5 - hits.length * 0.1,
+			votes: 100
+		});
+		if (hits.length >= 5) break;
+	}
+	return hits;
 }
 
 async function searchUg(
 	query: string
 ): Promise<{ hits: UgSearchHit[]; searchUrl: string }> {
-	const url = `https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(
-		query
-	)}`;
-	const html = await fetchHtml(url);
+	const url = buildSearchUrl(query);
+	const html = await fetchHtmlForSearch(url);
 	const data = extractJsStore(html);
 
 	// I søgeresultater ligger results enten på store.page.data.results eller
@@ -117,23 +224,25 @@ async function searchUg(
 }
 
 async function fetchTabPage(url: string, refererUrl?: string): Promise<UgFetchResult> {
-	const html = await fetchHtml(url, refererUrl);
+	const fetched = await fetchTabContent(url, refererUrl);
+	if (fetched.kind === 'html') return parseTabFromHtml(fetched.text, url);
+	return parseTabFromMarkdown(fetched.text, url);
+}
+
+function parseTabFromHtml(html: string, url: string): UgFetchResult {
 	const data = extractJsStore(html);
 	const tab = data?.store?.page?.data?.tab;
 	const wiki = data?.store?.page?.data?.tab_view?.wiki_tab;
 	const meta = data?.store?.page?.data?.tab_view?.meta;
-
 	if (!tab || !wiki?.content) {
 		throw new Error('Kunne ikke parse tab-data fra Ultimate Guitar');
 	}
-
 	const rawInput = cleanUgContent(String(wiki.content));
 	const title = String(tab.song_name ?? tab.title ?? '');
 	const artist = String(tab.artist_name ?? tab.artist ?? '');
 	const tuning = meta?.tuning?.value ? String(meta.tuning.value) : undefined;
 	const capo = meta?.capo ? Number(meta.capo) : undefined;
 	const keyGuess = meta?.tonality ? String(meta.tonality) : undefined;
-
 	return {
 		title,
 		artist,
@@ -146,11 +255,105 @@ async function fetchTabPage(url: string, refererUrl?: string): Promise<UgFetchRe
 }
 
 /**
- * UG blokerer Cloud Functions IP'er direkte (403 selv med browser-headers).
- * Vi proxier via corsproxy.io som allerede har løst bot-detection.
- * Hvis direkte fetch lykkes, bruger vi det; ellers falder vi tilbage til proxy.
+ * Jina returnerer tab-siden som ren markdown med UG's egne sektion-headers
+ * ([Intro], [Verse 1]) og chord/lyric-linjer i samme form som wiki_tab.content
+ * efter cleanUgContent. Vi udtrækker title+artist fra Jina's H1
+ * ("# WONDERWALL CHORDS (ver 2) by Oasis @ Ultimate-Guitar.Com") og lader
+ * cleanUgContent finde første [Section] og smide UG-navigation væk.
  */
-async function fetchHtml(url: string, refererUrl?: string): Promise<string> {
+function parseTabFromMarkdown(md: string, url: string): UgFetchResult {
+	const cleaned = cleanUgContent(md);
+	if (!cleaned || cleaned.split('\n').length < 3) {
+		throw new Error('Kunne ikke udlæse sang-indhold fra Ultimate Guitar (markdown)');
+	}
+	let title = '';
+	let artist = '';
+	const h1 = md.match(
+		/^#\s+(.+?)\s+CHORDS(?:\s+\(ver\s*\d+\))?\s+by\s+([^\n@]+?)\s*@\s*Ultimate-?Guitar/im
+	);
+	if (h1) {
+		title = toTitleCase(h1[1].trim());
+		artist = h1[2].trim();
+	} else {
+		const tline = md.match(/^Title:\s*(.+?)\s*[-–]\s*(.+?)\s*\(Chords\)/im);
+		if (tline) {
+			artist = tline[1].trim();
+			title = tline[2].trim();
+		}
+	}
+	return { title, artist, rawInput: cleaned, sourceUrl: url };
+}
+
+function toTitleCase(s: string): string {
+	return s
+		.toLowerCase()
+		.replace(/\b([a-zæøå])/g, (_, c) => c.toUpperCase());
+}
+
+interface FetchedHtml {
+	kind: 'html';
+	text: string;
+}
+interface FetchedMarkdown {
+	kind: 'markdown';
+	text: string;
+}
+
+/**
+ * UG's søgeside har søgehits i `<div class="js-store" data-content="...">`,
+ * også når Jina renderer den med X-Return-Format: html. Vi forsøger derfor:
+ *   1. direkte fetch (typisk 403 fra Cloud Functions IP)
+ *   2. Jina HTML-mode (samme js-store-struktur)
+ */
+async function fetchHtmlForSearch(url: string): Promise<string> {
+	try {
+		const res = await fetch(url, { headers: UG_HEADERS, redirect: 'follow' });
+		if (res.ok) {
+			const text = await res.text();
+			if (text.includes('js-store')) return text;
+		}
+	} catch {
+		// netværksfejl → fald gennem til Jina
+	}
+
+	const jinaHeaders: Record<string, string> = {
+		'X-Return-Format': 'html',
+		...(process.env.JINA_API_KEY
+			? { Authorization: `Bearer ${process.env.JINA_API_KEY}` }
+			: {})
+	};
+	let lastErr = '';
+	for (let attempt = 0; attempt < 3; attempt++) {
+		if (attempt > 0) await sleep(500 + attempt * 400);
+		try {
+			const res = await fetch(`https://r.jina.ai/${url}`, {
+				headers: jinaHeaders,
+				redirect: 'follow'
+			});
+			if (!res.ok) {
+				lastErr = `HTTP ${res.status}`;
+				continue;
+			}
+			const text = await res.text();
+			if (text.includes('js-store')) return text;
+			lastErr = 'ingen js-store-data (sandsynligvis Cloudflare-challenge)';
+		} catch (err) {
+			lastErr = err instanceof Error ? err.message : String(err);
+		}
+	}
+	throw new Error(`UG-søgning (Jina) fejlede efter retries: ${lastErr}`);
+}
+
+/**
+ * Tab-siden: direkte fetch giver os js-store (gammel parser). Jina i HTML-mode
+ * giver post-renderet DOM uden js-store — så vi bruger Jina's markdown-mode
+ * som returnerer chord/lyric-blokken som ren plaintext i samme form som
+ * wiki_tab.content (efter cleanUgContent).
+ */
+async function fetchTabContent(
+	url: string,
+	refererUrl?: string
+): Promise<FetchedHtml | FetchedMarkdown> {
 	const headers: Record<string, string> = { ...UG_HEADERS };
 	if (refererUrl) {
 		headers['Referer'] = refererUrl;
@@ -159,23 +362,61 @@ async function fetchHtml(url: string, refererUrl?: string): Promise<string> {
 
 	try {
 		const res = await fetch(url, { headers, redirect: 'follow' });
-		if (res.ok) return await res.text();
-		// 403/429 → fald gennem til proxy
+		if (res.ok) {
+			const text = await res.text();
+			if (text.includes('js-store')) return { kind: 'html', text };
+		}
 	} catch {
-		// netværksfejl → fald gennem til proxy
+		// netværksfejl → fald gennem til Jina markdown
 	}
 
-	const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-	const proxyRes = await fetch(proxyUrl, {
-		headers: { 'User-Agent': UG_HEADERS['User-Agent'] },
-		redirect: 'follow'
-	});
-	if (!proxyRes.ok) {
-		throw new Error(
-			`Ultimate Guitar (via proxy) svarede HTTP ${proxyRes.status} på ${url}`
-		);
+	// Jina's IP-pool roterer, og UG's Cloudflare-policy er per (IP, URL,
+	// time-window) — så samme request kan svare med Cloudflare-challenge på
+	// ét forsøg og med rigtig HTML på næste. Tre korte retries løfter hit-
+	// raten fra ~20% til ~70% på "cold" sider.
+	const jinaHeaders: Record<string, string> = process.env.JINA_API_KEY
+		? { Authorization: `Bearer ${process.env.JINA_API_KEY}` }
+		: {};
+	let lastErr: string = '';
+	for (let attempt = 0; attempt < 4; attempt++) {
+		if (attempt > 0) await sleep(600 + attempt * 400);
+		try {
+			const res = await fetch(`https://r.jina.ai/${url}`, {
+				headers: jinaHeaders,
+				redirect: 'follow'
+			});
+			if (!res.ok) {
+				lastErr = `HTTP ${res.status}`;
+				continue;
+			}
+			const text = await res.text();
+			if (isCloudflareChallenge(text)) {
+				lastErr = 'Cloudflare challenge';
+				continue;
+			}
+			return { kind: 'markdown', text };
+		} catch (err) {
+			lastErr = err instanceof Error ? err.message : String(err);
+		}
 	}
-	return await proxyRes.text();
+	throw new Error(`UG-tab (Jina) gav ikke indhold efter retries: ${lastErr}`);
+}
+
+function isCloudflareChallenge(text: string): boolean {
+	// Jina sender Cloudflare-challenge-siden videre som den er. Disse
+	// markører fanger både den klassiske "Just a moment..." og Jina's
+	// markdown-warning.
+	if (text.length < 3000) {
+		if (/Just a moment/i.test(text)) return true;
+		if (/CAPTCHA/i.test(text)) return true;
+		if (/Performing security verification/i.test(text)) return true;
+		if (/Warning: Target URL returned error 403/i.test(text)) return true;
+	}
+	return false;
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((r) => setTimeout(r, ms));
 }
 
 /** Find <div class="js-store" data-content="..."> og JSON-parse data-content. */

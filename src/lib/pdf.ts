@@ -39,6 +39,11 @@ interface SavedStyles {
 	layoutScale: string;
 }
 
+interface SliceBounds {
+	offsetY: number;
+	height: number;
+}
+
 function clamp(n: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, n));
 }
@@ -92,6 +97,58 @@ async function applyLayoutScale(
 	return saved;
 }
 
+function sectionBreaksForCanvas(pageEl: HTMLElement, canvas: HTMLCanvasElement): number[] {
+	const pageRect = pageEl.getBoundingClientRect();
+	const scaleY = canvas.height / pageRect.height;
+	const breaks = new Set<number>([0, canvas.height]);
+	for (const section of pageEl.querySelectorAll<HTMLElement>('.pdf-song-section')) {
+		const rect = section.getBoundingClientRect();
+		const top = Math.max(0, Math.round((rect.top - pageRect.top) * scaleY));
+		const bottom = Math.min(canvas.height, Math.round((rect.bottom - pageRect.top) * scaleY));
+		if (top > 0) breaks.add(top);
+		if (bottom > 0 && bottom < canvas.height) breaks.add(bottom);
+	}
+	return [...breaks].sort((a, b) => a - b);
+}
+
+function findBestSectionBreak(
+	breaks: number[],
+	offsetY: number,
+	maxHeight: number,
+	canvasHeight: number
+): number | null {
+	const hardLimit = Math.min(canvasHeight, offsetY + maxHeight);
+	let best: number | null = null;
+	for (const b of breaks) {
+		if (b <= offsetY + 1) continue;
+		if (b <= hardLimit + 1) best = b;
+		else break;
+	}
+	return best && best > offsetY ? best : null;
+}
+
+function makeSliceBounds(
+	canvas: HTMLCanvasElement,
+	slicePxHeight: number,
+	breaks: number[]
+): SliceBounds[] {
+	const slices: SliceBounds[] = [];
+	let offsetY = 0;
+	while (offsetY < canvas.height) {
+		const remaining = canvas.height - offsetY;
+		if (remaining <= slicePxHeight + 1) {
+			slices.push({ offsetY, height: remaining });
+			break;
+		}
+
+		const nextBreak = findBestSectionBreak(breaks, offsetY, slicePxHeight, canvas.height);
+		const height = nextBreak ? nextBreak - offsetY : Math.min(slicePxHeight, remaining);
+		slices.push({ offsetY, height });
+		offsetY += height;
+	}
+	return slices;
+}
+
 /**
  * Konverter et array af DOM-elementer (hver = én sang) til en PDF og
  * trigger download.
@@ -104,7 +161,6 @@ async function applyLayoutScale(
  * Default-output er PNG ved scale 3 — lossless og skarpt.
  */
 async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<void> {
-	const fitSinglePage = opts.fitSinglePage ?? true;
 	const renderScale = opts.scale ?? 3;
 	const imageFormat = opts.imageFormat ?? 'png';
 	const jpegQuality = opts.jpegQuality ?? 0.92;
@@ -121,7 +177,8 @@ async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<vo
 	for (const pageEl of pages) {
 		const targetHeightPx =
 			pageEl.getBoundingClientRect().width * (usableH / usableW) * FIT_HEIGHT_SAFETY;
-		const saved = await applyLayoutScale(pageEl, targetHeightPx, fitSinglePage);
+		const pageFitSinglePage = pageEl.dataset.fitSinglePage !== 'false';
+		const saved = await applyLayoutScale(pageEl, targetHeightPx, pageFitSinglePage);
 		const canvas = await html2canvas(pageEl, {
 			scale: renderScale,
 			backgroundColor: '#ffffff',
@@ -136,17 +193,15 @@ async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<vo
 		if (canvas.height <= slicePxHeight + 1) {
 			slices.push(canvas);
 		} else {
-			let offsetY = 0;
-			while (offsetY < canvas.height) {
-				const sliceHeight = Math.min(slicePxHeight, canvas.height - offsetY);
+			const breaks = sectionBreaksForCanvas(pageEl, canvas);
+			for (const bounds of makeSliceBounds(canvas, slicePxHeight, breaks)) {
 				const slice = document.createElement('canvas');
 				slice.width = canvas.width;
-				slice.height = sliceHeight;
+				slice.height = bounds.height;
 				const ctx = slice.getContext('2d');
 				if (!ctx) throw new Error('Kunne ikke oprette canvas-context til PDF-slice');
-				ctx.drawImage(canvas, 0, -offsetY);
+				ctx.drawImage(canvas, 0, -bounds.offsetY);
 				slices.push(slice);
-				offsetY += sliceHeight;
 			}
 		}
 
@@ -197,6 +252,7 @@ export async function exportSongsAsPdf(
 		const pageDiv = document.createElement('div');
 		pageDiv.style.background = '#ffffff';
 		pageDiv.style.padding = OFFSCREEN_PAGE_PADDING;
+		pageDiv.dataset.fitSinglePage = String(opts.fitSinglePage ?? song.fitSinglePage ?? true);
 		pageDiv.classList.add('pdf-snapshot-page');
 		wrapper.appendChild(pageDiv);
 		const c = mount(PrintableSong, { target: pageDiv, props: { song } });

@@ -14,7 +14,6 @@
 		buildSections,
 		findPreviousSameType,
 		parseRows,
-		reclassify,
 		type Row
 	} from '$lib/songParse';
 	import {
@@ -195,6 +194,119 @@
 		if (JSON.stringify(out) !== JSON.stringify(bassLines)) onBassLinesChange?.(out);
 	}
 
+	function chordRowIndicesInSection(start: number, end: number): number[] {
+		const out: number[] = [];
+		for (let i = start; i < end; i++) {
+			if (rows[i]?.kind === 'chord') out.push(i);
+		}
+		return out;
+	}
+
+	function previousSameTypeHasChords(headerIdx: number): boolean {
+		const src = findPreviousSameType(sections, headerIdx);
+		if (!src) return false;
+		return chordRowIndicesInSection(src.bodyStart, src.bodyEnd).length > 0;
+	}
+
+	function copyChordsAndBassFromPreviousSameType(headerIdx: number) {
+		if (!onBassLinesChange) return;
+		const cur = sections[headerIdx];
+		const src = findPreviousSameType(sections, headerIdx);
+		if (!cur || !src) return;
+
+		const srcChordRows = chordRowIndicesInSection(src.bodyStart, src.bodyEnd);
+		const targetChordRows = chordRowIndicesInSection(cur.bodyStart, cur.bodyEnd);
+		if (srcChordRows.length === 0 || targetChordRows.length === 0) return;
+
+		const nextRows = [...rows];
+		const next: BassLines = { ...bassLines };
+		let changed = false;
+		const count = Math.min(srcChordRows.length, targetChordRows.length);
+		for (let i = 0; i < count; i++) {
+			const srcRow = rows[srcChordRows[i]];
+			const targetIdx = targetChordRows[i];
+			const targetRow = rows[targetIdx];
+			if (srcRow?.kind === 'chord' && targetRow?.kind === 'chord' && srcRow.text !== targetRow.text) {
+				nextRows[targetIdx] = { ...targetRow, text: srcRow.text };
+				changed = true;
+			}
+
+			const srcLine = bassLines[String(srcChordRows[i])];
+			const targetKey = String(targetIdx);
+			if (srcLine?.trim()) {
+				if (next[targetKey] !== srcLine) {
+					next[targetKey] = srcLine;
+					changed = true;
+				}
+			} else if (next[targetKey]) {
+				delete next[targetKey];
+				changed = true;
+			}
+		}
+		if (!changed) return;
+		emit(nextRows);
+		onBassLinesChange(next);
+	}
+
+	function moveSection(sourceHeaderIdx: number, targetHeaderIdx: number) {
+		if (sourceHeaderIdx === targetHeaderIdx) return;
+		const source = sections[sourceHeaderIdx];
+		const target = sections[targetHeaderIdx];
+		if (!source || !target) return;
+
+		const sourceStart = source.headerRowIdx;
+		const sourceEnd = source.bodyEnd;
+		const movingRows = rows.slice(sourceStart, sourceEnd);
+		const withoutSource = [...rows.slice(0, sourceStart), ...rows.slice(sourceEnd)];
+
+		let insertAt = target.headerRowIdx;
+		if (target.headerRowIdx > sourceStart) insertAt -= movingRows.length;
+
+		const next = [...withoutSource.slice(0, insertAt), ...movingRows, ...withoutSource.slice(insertAt)];
+		emit(next);
+
+		const oldToNew = new Map<number, number>();
+		for (let oldIdx = 0; oldIdx < rows.length; oldIdx++) {
+			let newIdx: number;
+			if (oldIdx >= sourceStart && oldIdx < sourceEnd) {
+				newIdx = insertAt + (oldIdx - sourceStart);
+			} else {
+				newIdx = oldIdx;
+				if (oldIdx >= sourceEnd) newIdx -= movingRows.length;
+				if (newIdx >= insertAt) newIdx += movingRows.length;
+			}
+			oldToNew.set(oldIdx, newIdx);
+		}
+
+		const movedBassLines: BassLines = {};
+		for (const [k, v] of Object.entries(bassLines)) {
+			const oldIdx = Number(k);
+			const newIdx = oldToNew.get(oldIdx);
+			if (newIdx !== undefined) movedBassLines[String(newIdx)] = v;
+		}
+		if (JSON.stringify(movedBassLines) !== JSON.stringify(bassLines)) {
+			onBassLinesChange?.(movedBassLines);
+		}
+
+		if (onCollapsedSectionsChange) {
+			const nextSections = buildSections(next);
+			const sourceLabel = source.headerText;
+			const collapsedLabels = new Set(
+				collapsedSections.map((idx) => sections[idx]?.headerText).filter(Boolean)
+			);
+			// Bevar collapsed-state for de sektioner der allerede var collapsed.
+			// Hvis den flyttede sektion var collapsed, følger den også med via label.
+			const nextCollapsed = nextSections
+				.map((s, idx) => (collapsedLabels.has(s.headerText) || s.headerText === sourceLabel && collapsedSet.has(sourceHeaderIdx) ? idx : -1))
+				.filter((idx) => idx >= 0);
+			if (JSON.stringify(nextCollapsed) !== JSON.stringify(collapsedSections)) {
+				onCollapsedSectionsChange(nextCollapsed);
+			}
+		}
+
+		hoveredRow = null;
+	}
+
 	// ──────────────────────────────────────────────────────────────────────
 	// Cell-redigering (lyric/header/blank)
 	// ──────────────────────────────────────────────────────────────────────
@@ -217,20 +329,15 @@
 	function onCellBlur(idx: number) {
 		const r = rows[idx];
 		if (!r) return;
-		let reclassified = reclassify(r);
-		if (reclassified.kind === 'header') {
-			const cleaned = cleanSectionHeader(reclassified.text);
-			if (cleaned !== reclassified.text) {
-				reclassified = { kind: 'header', text: cleaned };
-				const el = document.querySelector(
-					`.editable-song [data-row="${idx}"][data-field="text"]`
-				) as HTMLElement | null;
-				if (el && el.innerText !== cleaned) el.innerText = cleaned;
-			}
-		}
-		if (reclassified !== r) {
+		if (r.kind === 'header') {
+			const cleaned = cleanSectionHeader(r.text);
+			if (cleaned === r.text) return;
 			const next = [...rows];
-			next[idx] = reclassified;
+			next[idx] = { kind: 'header', text: cleaned };
+			const el = document.querySelector(
+				`.editable-song [data-row="${idx}"][data-field="text"]`
+			) as HTMLElement | null;
+			if (el && el.innerText !== cleaned) el.innerText = cleaned;
 			emit(next);
 		}
 	}
@@ -360,11 +467,24 @@
 
 	function insertRowAbove(idx: number) {
 		if (idx < 0 || idx > rows.length) return;
-		const next = [...rows.slice(0, idx), { kind: 'blank' as const }, ...rows.slice(idx)];
+		let insertIdx = idx;
+		const target = rows[idx];
+		if (target?.kind === 'header') {
+			const targetHeaderIdx = sections.findIndex((s) => s.headerRowIdx === idx);
+			const prev = targetHeaderIdx > 0 ? sections[targetHeaderIdx - 1] : null;
+			// Hvis forrige formstykke er klappet sammen, ville en blank linje lige
+			// før næste header teknisk ligge i forrige formstykke og derfor blive
+			// skjult. I det tilfælde lægger vi linjen før den collapsed sektion,
+			// så brugeren faktisk kan se og skrive i den.
+			if (prev && collapsedSet.has(prev.headerIdx) && idx === prev.bodyEnd) {
+				insertIdx = prev.headerRowIdx;
+			}
+		}
+		const next = [...rows.slice(0, insertIdx), { kind: 'blank' as const }, ...rows.slice(insertIdx)];
 		emit(next);
-		shiftBassLines(idx, 1);
-		focusRow(idx);
-		hoveredRow = idx;
+		shiftBassLines(insertIdx, 1);
+		focusRow(insertIdx);
+		hoveredRow = insertIdx;
 	}
 
 	function onCellPaste(e: ClipboardEvent, idx: number) {
@@ -498,6 +618,8 @@
 	type DragCol = 'chord' | 'bass';
 	let dragInfo = $state<{ rowIdx: number; col: DragCol } | null>(null);
 	let dropTarget = $state<{ rowIdx: number; col: DragCol } | null>(null);
+	let sectionDrag = $state<{ headerIdx: number } | null>(null);
+	let sectionDropTarget = $state<number | null>(null);
 
 	function onLineDragStart(e: DragEvent, rowIdx: number, col: DragCol) {
 		if (!e.dataTransfer) return;
@@ -560,6 +682,41 @@
 		const srcLine = bassLines[String(srcIdx)];
 		if (!srcLine || !srcLine.trim()) return;
 		onBassLinesChange({ ...bassLines, [String(tgtIdx)]: srcLine });
+	}
+
+	function onSectionDragStart(e: DragEvent, headerIdx: number) {
+		if (!e.dataTransfer) return;
+		e.dataTransfer.effectAllowed = 'move';
+		e.dataTransfer.setData('application/x-song-section', String(headerIdx));
+		e.dataTransfer.setData('text/plain', sections[headerIdx]?.headerText ?? 'Formstykke');
+		sectionDrag = { headerIdx };
+		sectionDropTarget = null;
+	}
+
+	function onSectionDragEnd() {
+		sectionDrag = null;
+		sectionDropTarget = null;
+	}
+
+	function onSectionDragOver(e: DragEvent, headerIdx: number) {
+		if (!sectionDrag || sectionDrag.headerIdx === headerIdx) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		if (sectionDropTarget !== headerIdx) sectionDropTarget = headerIdx;
+	}
+
+	function onSectionDragLeave(headerIdx: number) {
+		if (sectionDropTarget === headerIdx) sectionDropTarget = null;
+	}
+
+	function onSectionDrop(e: DragEvent, targetHeaderIdx: number) {
+		e.preventDefault();
+		const raw = e.dataTransfer?.getData('application/x-song-section');
+		const sourceHeaderIdx = raw ? Number(raw) : sectionDrag?.headerIdx;
+		sectionDrag = null;
+		sectionDropTarget = null;
+		if (sourceHeaderIdx === undefined || !Number.isInteger(sourceHeaderIdx)) return;
+		moveSection(sourceHeaderIdx, targetHeaderIdx);
 	}
 
 	function focusOnMount(node: HTMLInputElement) {
@@ -639,6 +796,14 @@
 			<div
 				class="section-header-cell"
 				class:section-header-cell--collapsed={isCollapsed}
+				class:section-drop-target={sectionDropTarget === headerIdx}
+				class:section-drag-source={sectionDrag?.headerIdx === headerIdx}
+				draggable={readOnly || headerIdx < 0 ? 'false' : 'true'}
+				ondragstart={readOnly || headerIdx < 0 ? undefined : (e) => onSectionDragStart(e, headerIdx)}
+				ondragend={readOnly ? undefined : onSectionDragEnd}
+				ondragover={readOnly || headerIdx < 0 ? undefined : (e) => onSectionDragOver(e, headerIdx)}
+				ondragleave={readOnly || headerIdx < 0 ? undefined : () => onSectionDragLeave(headerIdx)}
+				ondrop={readOnly || headerIdx < 0 ? undefined : (e) => onSectionDrop(e, headerIdx)}
 				onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
 			>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -672,6 +837,22 @@
 									<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
 								</svg>
 							</button>
+							{#if previousSameTypeHasChords(headerIdx)}
+								<button
+									type="button"
+									class="section-action-btn section-action-btn--bass"
+									title="Kopiér akkorder og bas fra forrige {prevSame.headerText}"
+									aria-label="Kopiér akkorder og bas fra forrige {prevSame.headerText}"
+									onmousedown={(e) => e.preventDefault()}
+									onclick={() => copyChordsAndBassFromPreviousSameType(headerIdx)}
+								>
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<path d="M9 18V5l12-2v13"></path>
+										<circle cx="6" cy="18" r="3"></circle>
+										<circle cx="18" cy="16" r="3"></circle>
+									</svg>
+								</button>
+							{/if}
 						{/if}
 						<button
 							type="button"
@@ -708,13 +889,14 @@
 			</div>
 		{:else if isRowHidden(i)}
 			<!-- skjult af kollapset sektion -->
-		{:else if row.kind === 'blank'}
+		{:else if row.kind === 'blank' || row.kind === 'lyric'}
 			{@render rowGutter(i)}
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 			<div
 				class="lyrics-cell blank-cell"
+				class:lyric-cell={row.kind === 'lyric'}
 				contenteditable={readOnly ? 'false' : 'plaintext-only'}
-				use:init={''}
+				use:init={row.kind === 'blank' ? '' : row.text}
 				data-row={i}
 				data-field="text"
 				oninput={readOnly ? undefined : (e) => onCellInput(e, i)}
@@ -724,12 +906,34 @@
 				onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
 				role={readOnly ? 'presentation' : 'textbox'}
 				tabindex={readOnly ? undefined : 0}
-				aria-label={readOnly ? undefined : 'Tom linje'}
+				aria-label={readOnly ? undefined : row.kind === 'blank' ? 'Tom linje' : 'Tekst-linje'}
 			></div>
-			<div
-				class="rhythm-cell"
-				onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
-			></div>
+			{@const bassChordIdx = chordRowAbove(i)}
+			{#if bassChordIdx !== null}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<div
+					class="rhythm-cell rhythm-cell-clickable"
+					class:drop-target={dropTarget?.rowIdx === bassChordIdx && dropTarget?.col === 'bass'}
+					class:drag-source={dragInfo?.rowIdx === bassChordIdx && dragInfo?.col === 'bass'}
+					title={readOnly ? undefined : 'Klik for at redigere · træk for at kopiere bass-linjen'}
+					draggable={readOnly ? 'false' : 'true'}
+					ondragstart={readOnly ? undefined : (e) => onLineDragStart(e, bassChordIdx, 'bass')}
+					ondragend={readOnly ? undefined : onLineDragEnd}
+					ondragover={readOnly ? undefined : (e) => onLineDragOver(e, bassChordIdx, 'bass')}
+					ondragleave={readOnly ? undefined : () => onLineDragLeave(bassChordIdx, 'bass')}
+					ondrop={readOnly ? undefined : (e) => onLineDrop(e, bassChordIdx, 'bass')}
+					onclick={readOnly ? undefined : () => openBassModal(bassChordIdx)}
+					onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
+				>
+					{@html bassHtmlFor(bassChordIdx)}
+				</div>
+			{:else}
+				<div
+					class="rhythm-cell"
+					onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
+				></div>
+			{/if}
 		{:else if row.kind === 'chord'}
 			{@render rowGutter(i)}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -778,50 +982,6 @@
 				>
 					{@html bassHtmlFor(i)}
 				</div>
-			{/if}
-		{:else if row.kind === 'lyric'}
-			{@render rowGutter(i)}
-			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-			<div
-				class="lyrics-cell lyric-cell"
-				contenteditable={readOnly ? 'false' : 'plaintext-only'}
-				use:init={row.text}
-				data-row={i}
-				data-field="text"
-				oninput={readOnly ? undefined : (e) => onCellInput(e, i)}
-				onblur={readOnly ? undefined : () => onCellBlur(i)}
-				onkeydown={readOnly ? undefined : (e) => onCellKeydown(e, i)}
-				onpaste={readOnly ? undefined : (e) => onCellPaste(e, i)}
-				onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
-				role={readOnly ? 'presentation' : 'textbox'}
-				tabindex={readOnly ? undefined : 0}
-				aria-label={readOnly ? undefined : 'Tekst-linje'}
-			></div>
-			{@const bassChordIdx = chordRowAbove(i)}
-			{#if bassChordIdx !== null}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
-				<div
-					class="rhythm-cell rhythm-cell-clickable"
-					class:drop-target={dropTarget?.rowIdx === bassChordIdx && dropTarget?.col === 'bass'}
-					class:drag-source={dragInfo?.rowIdx === bassChordIdx && dragInfo?.col === 'bass'}
-					title={readOnly ? undefined : 'Klik for at redigere · træk for at kopiere bass-linjen'}
-					draggable={readOnly ? 'false' : 'true'}
-					ondragstart={readOnly ? undefined : (e) => onLineDragStart(e, bassChordIdx, 'bass')}
-					ondragend={readOnly ? undefined : onLineDragEnd}
-					ondragover={readOnly ? undefined : (e) => onLineDragOver(e, bassChordIdx, 'bass')}
-					ondragleave={readOnly ? undefined : () => onLineDragLeave(bassChordIdx, 'bass')}
-					ondrop={readOnly ? undefined : (e) => onLineDrop(e, bassChordIdx, 'bass')}
-					onclick={readOnly ? undefined : () => openBassModal(bassChordIdx)}
-					onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
-				>
-					{@html bassHtmlFor(bassChordIdx)}
-				</div>
-			{:else}
-				<div
-					class="rhythm-cell"
-					onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
-				></div>
 			{/if}
 		{/if}
 	{/each}
@@ -932,6 +1092,25 @@
 		display: flex;
 		align-items: center;
 		gap: 0.4em;
+		border-radius: 999px;
+	}
+	.editable-song:not(.read-only) .section-header-cell {
+		cursor: grab;
+	}
+	.editable-song .section-header-cell.section-drag-source {
+		opacity: 0.45;
+	}
+	.editable-song .section-header-cell.section-drop-target {
+		background: rgba(245, 158, 11, 0.16);
+		box-shadow: inset 0 0 0 2px var(--color-accent, #f59e0b);
+	}
+	.editable-song .section-header-cell.section-drop-target::before {
+		content: 'Slip her';
+		color: var(--color-accent, #f59e0b);
+		font-size: 0.7em;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
 	}
 	.editable-song .section-header-actions {
 		display: inline-flex;
@@ -963,6 +1142,10 @@
 	.editable-song .section-action-btn:hover {
 		background: rgba(245, 158, 11, 0.18);
 		color: var(--color-accent, #f59e0b);
+	}
+	.editable-song .section-action-btn--bass:hover {
+		background: rgba(13, 148, 136, 0.18);
+		color: #0f766e;
 	}
 	.editable-song .section-action-btn--danger:hover {
 		background: rgba(239, 68, 68, 0.2);

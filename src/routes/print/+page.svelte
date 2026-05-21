@@ -5,7 +5,7 @@
 	import { BAND } from '$lib/data/band';
 	import { subscribeSongs } from '$lib/firebase/songs';
 	import PrintableSong from '$lib/components/PrintableSong.svelte';
-	import { exportExistingPagesAsPdf } from '$lib/pdf';
+	import { exportSongsAsPdf } from '$lib/pdf';
 	import type { SongDoc } from '$lib/types';
 
 	$effect(() => {
@@ -43,8 +43,7 @@
 		if (pdfBusy || filtered.length === 0) return;
 		pdfBusy = true;
 		try {
-			const pages = Array.from(document.querySelectorAll<HTMLElement>('.print-page'));
-			await exportExistingPagesAsPdf(pages, {
+			await exportSongsAsPdf(filtered, {
 				filename: bookTitle,
 				withBassTabs,
 				fitSinglePage

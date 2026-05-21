@@ -1,6 +1,7 @@
 rules_version = '2';
 // CANONICAL merged rules for Firebase project `p5-firebase-eebc1`.
-// Source repo: `ddu-dragdrop/firestore.rules`.
+// Source repo: `ddu-dragdrop/firestore.rules` (authoritative copy in `AI Hub 2 Cursor`).
+// This file mirrors the canonical rules and adds the informatik-c wiki block at the bottom.
 // Before deploying, open the Console Rules tab and merge any edits that exist only there.
 // Deploy: from this folder → `firebase deploy --only firestore:rules --project p5-firebase-eebc1`
 
@@ -18,23 +19,55 @@ service cloud.firestore {
     }
 
     // ----------------------------------------------------------
-    // DDU assignment board (drag-drop elever) — `ddu-dragdrop`.
-    // Alle må læse levende fordeling; kun udvalgte må skrive.
+    // Generic drag-and-drop lists — `ddu-dragdrop` (rewritten).
+    // Any signed-in user can create lists. Owner controls visibility:
+    //   - visibility == "public" → anyone with the link can READ.
+    //   - editorEmails contains the viewer's verified email → can WRITE.
+    // Owner can always read/write/delete.
+    //
+    // Rules are split into multiple flat allow branches so Firestore's
+    // static query analyzer can prove each dashboard query (where ownerUid
+    // == auth.uid, or where editorEmails array-contains email) satisfies
+    // at least one branch.
     // ----------------------------------------------------------
-    function isDduAssignmentEditor() {
-      return signedIn()
-        && request.auth.token.email in [
-          'simmoe@gmail.com',
-          'jrb@nextkbh.dk',
-          'mastermarvick@gmail.com'
-        ];
-    }
 
-    match /CURSOR_ddu_assignment/{docId} {
-      allow read: if true;
-      allow create: if isDduAssignmentEditor();
-      allow update: if isDduAssignmentEditor();
-      allow delete: if false;
+    match /CURSOR_dnd_lists/{listId} {
+      // READ — public lists are world-readable
+      allow read: if resource.data.visibility == "public";
+
+      // READ — owner
+      allow read: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid;
+
+      // READ — invited editor (verified email in the editorEmails list)
+      allow read: if request.auth != null
+        && request.auth.token.email_verified == true
+        && resource.data.editorEmails is list
+        && request.auth.token.email in resource.data.editorEmails;
+
+      // CREATE — any signed-in user; ownerUid must be self
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() < 200
+        && request.resource.data.visibility in ["public", "private"];
+
+      // UPDATE — owner (ownerUid is immutable)
+      allow update: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+
+      // UPDATE — invited editor (cannot change ownerUid)
+      allow update: if request.auth != null
+        && request.auth.token.email_verified == true
+        && resource.data.editorEmails is list
+        && request.auth.token.email in resource.data.editorEmails
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+
+      // DELETE — owner only
+      allow delete: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid;
     }
 
     // User profile docs
@@ -126,9 +159,92 @@ service cloud.firestore {
         allow read, write: if isChordBandMember(bandId);
       }
 
+      // Fælles klient-indstillinger for sangbogen (fx kategori-farver).
+      match /settings/{settingsId} {
+        allow read, write: if isChordBandMember(bandId);
+      }
+
       // Sætlister
       match /setlists/{setlistId} {
         allow read, write: if isChordBandMember(bandId);
+      }
+    }
+
+    // ================================================================
+    // Informatik C — fagbegrebs-wiki / opslagsbog.
+    // Tilføjet 2026-05-12. Alle indloggede må læse og skrive (Google).
+    // Hvert opslag har en forfatter; redigering bevarer historik via
+    // separate explanations-dokumenter under hvert opslag.
+    // ================================================================
+
+    // Stamp = { uid, name } lagret på dokumenterne (createdBy, defaultAuthor,
+    // explanations.author). Må matche den indloggede bruger.
+    function infcStamp(stamp) {
+      return stamp is map
+        && stamp.uid == request.auth.uid
+        && stamp.name is string
+        && stamp.name.size() > 0;
+    }
+
+    // Ekstra forklaring: nye dokumenter har kun `mediaUrl`; ældre kan have ren tekst i `body`.
+    function infcExplHasContent(data) {
+      return (data.mediaUrl is string
+              && data.mediaUrl.size() > 0
+              && data.mediaUrl.size() < 2100)
+        || (data.kind == 'text'
+            && data.body is string
+            && data.body.size() > 0
+            && data.body.size() < 50000);
+    }
+
+    // Hovedopslag — slug som document-id.
+    match /informatik_c_entries/{slug} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.term is string
+        && request.resource.data.term.size() > 0
+        && request.resource.data.term.size() < 200
+        && request.resource.data.slug == slug
+        && request.resource.data.defaultText is string
+        && infcStamp(request.resource.data.createdBy)
+        && infcStamp(request.resource.data.defaultAuthor);
+
+      // Update: alle må redigere default-teksten; slug, createdBy og defaultAuthor er låst.
+      allow update: if signedIn()
+        && request.resource.data.slug == resource.data.slug
+        && request.resource.data.createdBy == resource.data.createdBy
+        && (!('defaultAuthor' in resource.data)
+            || request.resource.data.defaultAuthor == resource.data.defaultAuthor)
+        && request.resource.data.term is string
+        && request.resource.data.term.size() > 0
+        && request.resource.data.defaultText is string;
+
+      // Ingen sletning fra UI — bevarer historik.
+      allow delete: if false;
+
+      // Ekstra forklaringer — ét link/sti i nye opslag; legacy: tekst uden link.
+      match /explanations/{explId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.kind in ['text', 'image', 'video', 'audio', 'link']
+          && request.resource.data.body is string
+          && request.resource.data.body.size() < 50000
+          && request.resource.data.title is string
+          && request.resource.data.title.size() < 200
+          && infcStamp(request.resource.data.author)
+          && infcExplHasContent(request.resource.data);
+        allow update: if signedIn()
+          && request.resource.data.kind in ['text', 'image', 'video', 'audio', 'link']
+          && request.resource.data.body is string
+          && request.resource.data.body.size() < 50000
+          && request.resource.data.title is string
+          && request.resource.data.title.size() < 200
+          && infcStamp(request.resource.data.author)
+          && infcExplHasContent(request.resource.data);
+        // Sletning kun af den oprindelige forfatter.
+        allow delete: if signedIn()
+          && resource.data.author.uid == request.auth.uid;
       }
     }
   }

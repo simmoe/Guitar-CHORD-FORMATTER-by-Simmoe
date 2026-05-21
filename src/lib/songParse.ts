@@ -141,6 +141,26 @@ function couldBeHeaderPrefix(text: string): boolean {
 	return HEADER_KEYWORDS.some((kw) => kw.startsWith(t));
 }
 
+/**
+ * Auto-promote til chord-linje er kun sikkert når brugeren har skrevet noget
+ * der **utvetydigt** er chord-notation. Et enkelt token som "Cm7" eller "Am"
+ * kunne lige så godt være lyric-tekst (eller indledningen på et længere ord),
+ * og det er irriterende hvis det skifter til monospace blå styling så snart
+ * man blur'er linjen. Vi kræver derfor enten:
+ *   - mindst 2 tokens adskilt af whitespace ("Em G D A"), eller
+ *   - pipe-notation ("| Am | Em |")
+ * Multi-token og pipe-formen er måder brugeren eksplicit signalerer
+ * akkord-linje. Hvis ingen af delene er der, lader vi den blive som lyric —
+ * man kan altid eksplicit klikke ind i linjen via chord-modal'en.
+ */
+function isUnambiguousChordLine(text: string): boolean {
+	if (!isChordLine(text)) return false;
+	const stripped = text.replace(/\|/g, ' ').trim();
+	if (text.includes('|')) return true;
+	const tokens = stripped.split(/\s+/).filter(Boolean);
+	return tokens.length >= 2;
+}
+
 export function reclassify(row: Row): Row {
 	if (row.kind === 'lyric' && isSectionHeader(row.text)) {
 		return { kind: 'header', text: cleanSectionHeader(row.text) };
@@ -148,7 +168,7 @@ export function reclassify(row: Row): Row {
 	if (
 		row.kind === 'lyric' &&
 		row.text.trim() !== '' &&
-		isChordLine(row.text) &&
+		isUnambiguousChordLine(row.text) &&
 		!(!row.text.includes(' ') && couldBeHeaderPrefix(row.text))
 	) {
 		return { kind: 'chord', text: row.text };
@@ -157,7 +177,7 @@ export function reclassify(row: Row): Row {
 		return { kind: 'lyric', text: row.text };
 	}
 	if (row.kind === 'header' && !isSectionHeader(row.text)) {
-		return isChordLine(row.text)
+		return isUnambiguousChordLine(row.text)
 			? { kind: 'chord', text: row.text }
 			: { kind: 'lyric', text: row.text };
 	}

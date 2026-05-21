@@ -2,8 +2,13 @@
 	import { goto } from '$app/navigation';
 	import { authState } from '$lib/auth.svelte';
 	import { BAND } from '$lib/data/band';
-	import { createSong, subscribeSongs } from '$lib/firebase/songs';
-	import { fetchUgTab } from '$lib/firebase/ug';
+	import {
+		createSong,
+		saveCategoryColors,
+		subscribeCategoryColors,
+		subscribeSongs
+	} from '$lib/firebase/songs';
+	import { fetchUgTab, type UgFetchErrorDetails } from '$lib/firebase/ug';
 	import {
 		uniqueCategoriesFromSongs,
 		normalizeRawInputAccidentals,
@@ -18,19 +23,42 @@
 		serializeRows,
 		type Row
 	} from '$lib/songParse';
-	import type { SongDoc } from '$lib/types';
+	import { bookmarkletHref } from '$lib/ugImport';
+	import {
+		assignMissingCategoryColors,
+		hasSameCategoryColors
+	} from '$lib/categoryColors';
+	import type { CategoryColorMap, SongDoc } from '$lib/types';
 
 	$effect(() => {
 		if (!authState.loading && !authState.user) goto('/login');
 	});
 
 	let allSongs = $state<SongDoc[]>([]);
+	let categoryColorMap = $state<CategoryColorMap>({});
 	$effect(() => {
 		if (!authState.user) return;
 		const unsub = subscribeSongs((s) => (allSongs = s));
 		return () => unsub();
 	});
+	$effect(() => {
+		if (!authState.user) return;
+		const unsub = subscribeCategoryColors((colors) => (categoryColorMap = colors));
+		return () => unsub();
+	});
 	const knownCategories = $derived(uniqueCategoriesFromSongs(allSongs));
+	const effectiveCategoryColorMap = $derived(
+		assignMissingCategoryColors(knownCategories, categoryColorMap)
+	);
+	$effect(() => {
+		if (!authState.user || knownCategories.length === 0) return;
+		if (!hasSameCategoryColors(effectiveCategoryColorMap, categoryColorMap)) {
+			void saveCategoryColors(effectiveCategoryColorMap);
+		}
+	});
+	const ugBookmarkletHref = $derived(
+		typeof location !== 'undefined' ? bookmarkletHref(location.origin) : ''
+	);
 
 	// ───── Primært flow: bare skriv en titel og lad UG-fetch ordne resten ─────
 	let query = $state('');
@@ -38,50 +66,167 @@
 	let fetching = $state(false);
 	let fetchError = $state<string | null>(null);
 
+	// Paste-fallback: vises når Cloud Function-fetch fejler. Vi åbner UG-siden
+	// automatisk i ny tab (med tekst-fragment så browseren scrolls til chord-
+	// blokken), og lader brugeren paste indholdet i denne modal.
+	interface PasteFallback {
+		title: string;
+		artist: string;
+		ugUrl: string;
+		stage: 'search' | 'tab' | 'no-hits';
+		rawText: string;
+		importing: boolean;
+		error: string | null;
+	}
+	let paste = $state<PasteFallback | null>(null);
+	let pasteAreaEl: HTMLTextAreaElement | null = $state(null);
+	$effect(() => {
+		if (paste && pasteAreaEl) pasteAreaEl.focus();
+	});
+
 	const URL_RX = /^https?:\/\//i;
+
+	function buildUgSearchUrl(title: string, artist: string): string {
+		const q = artist ? `${title} ${artist}` : title;
+		return `https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(q)}`;
+	}
+
+	/**
+	 * UG renderer chord-sektionerne med deres egne `[Intro]`/`[Verse]` headers
+	 * inde i den synlige tekst, så Chrome/Edge/Safari's `#:~:text=`-fragment
+	 * scroller direkte til dem (og highlighter dem gult). `[Intro]` er mest
+	 * almindeligt; ellers falder browseren bare lydløst tilbage til top.
+	 */
+	function withChordHighlight(url: string): string {
+		if (!URL_RX.test(url)) return url;
+		const sep = url.includes('#') ? '' : '#:~:text=%5BIntro%5D';
+		return url + sep;
+	}
+
+	function openUgInNewTab(url: string): void {
+		try {
+			window.open(url, '_blank', 'noopener,noreferrer');
+		} catch {
+			// pop-up blokeret — brugeren har stadig URL'en synlig i modal'en
+		}
+	}
+
+	function ugDetailsFromError(err: unknown): UgFetchErrorDetails | undefined {
+		const e = err as {
+			details?: UgFetchErrorDetails;
+			customData?: { details?: UgFetchErrorDetails };
+			message?: string;
+		};
+		const details = e?.details ?? e?.customData?.details;
+		if (details) return details;
+		const m = e?.message?.match(/https:\/\/tabs\.ultimate-guitar\.com\/tab\/[^\s)]+/);
+		return m ? { stage: 'tab', tabUrl: m[0] } : undefined;
+	}
 
 	async function handleAutoFetch() {
 		if (!authState.user) return;
 		const t = query.trim();
 		if (!t) return;
 		const a = artistQuery.trim();
-		// Hvis brugeren har pastet en URL i titel-feltet, send kun den.
-		// Ellers kombinér titel + kunstner som UG søger på.
 		const q = URL_RX.test(t) ? t : a ? `${t} ${a}` : t;
 		fetching = true;
 		fetchError = null;
+		paste = null;
 		try {
 			const ug = await fetchUgTab(q);
-			const artistVal = ug.artist || a || undefined;
-			// Engangs-konvertering ved import: parse den rå UG-tekst til
-			// strukturerede rows og gem som ny v4-form.
-			const rawNormalized = normalizeRawInputAccidentals(ug.rawInput);
-			const importedRows = normalizeImportedChordSpacing(parseRows(rawNormalized));
-			const barsPL: 2 | 4 | 8 = 4;
-			const bassLines = inferBassLinesForImportedRows(importedRows, barsPL);
-			const id = await createSong(
-				{
-					title: ug.title || t,
-					...(artistVal ? { artist: artistVal } : {}),
-					...(ug.keyGuess ? { key: normalizeAccidentals(ug.keyGuess) } : {}),
-					rawInput: serializeRows(importedRows),
-					rows: importedRows,
-					barsPerLine: barsPL,
-					...(Object.keys(bassLines).length > 0 ? { bassLines } : {}),
-					categories: [],
-					schemaVersion: 4,
-					...(ug.sourceUrl ? { sourceUrl: ug.sourceUrl } : {}),
-					...(ug.capo !== undefined ? { capo: ug.capo } : {})
-				},
-				authState.user.uid
-			);
-			goto(`/song/${id}`);
+			await persistAndGo({
+				title: ug.title || t,
+				artist: ug.artist || a,
+				rawInput: ug.rawInput,
+				sourceUrl: ug.sourceUrl,
+				keyGuess: ug.keyGuess,
+				capo: ug.capo
+			});
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : 'Ukendt fejl';
-			fetchError = `Kunne ikke hente fra Ultimate Guitar: ${msg}. Prøv at finde sangen på ultimate-guitar.com og indsæt dens URL — eller udfyld den manuelt nedenfor.`;
+			openPasteFallback(err, t, a);
 		} finally {
 			fetching = false;
 		}
+	}
+
+	function openPasteFallback(err: unknown, t: string, a: string): void {
+		const details = ugDetailsFromError(err);
+		const stage = details?.stage ?? 'search';
+		const ugUrl =
+			details?.tabUrl ??
+			details?.searchUrl ??
+			(URL_RX.test(t) ? t : buildUgSearchUrl(t, a));
+		const openUrl = details?.tabUrl ? withChordHighlight(details.tabUrl) : ugUrl;
+		openUgInNewTab(openUrl);
+		paste = {
+			title: t,
+			artist: a,
+			ugUrl,
+			stage,
+			rawText: '',
+			importing: false,
+			error: null
+		};
+		const msg = err instanceof Error ? err.message : 'Ukendt fejl';
+		fetchError = `Ultimate Guitar svarede ikke (${msg}). Vi har åbnet siden for dig i en ny fane — kopiér chord-blokken og paste den i feltet til højre.`;
+	}
+
+	async function handlePasteImport() {
+		if (!paste || !authState.user) return;
+		const raw = paste.rawText.trim();
+		if (!raw) {
+			paste.error = 'Paste chord+lyric-tekst fra UG først.';
+			return;
+		}
+		paste.importing = true;
+		paste.error = null;
+		try {
+			await persistAndGo({
+				title: paste.title || 'Untitled',
+				artist: paste.artist,
+				rawInput: raw,
+				sourceUrl: paste.ugUrl
+			});
+		} catch (err) {
+			paste.error = err instanceof Error ? err.message : 'Ukendt fejl';
+		} finally {
+			if (paste) paste.importing = false;
+		}
+	}
+
+	interface PersistArgs {
+		title: string;
+		artist: string;
+		rawInput: string;
+		sourceUrl?: string;
+		keyGuess?: string;
+		capo?: number;
+	}
+
+	async function persistAndGo(args: PersistArgs): Promise<void> {
+		if (!authState.user) return;
+		const rawNormalized = normalizeRawInputAccidentals(args.rawInput);
+		const importedRows = normalizeImportedChordSpacing(parseRows(rawNormalized));
+		const barsPL: 2 | 4 | 8 = 4;
+		const bassLines = inferBassLinesForImportedRows(importedRows, barsPL);
+		const id = await createSong(
+			{
+				title: args.title,
+				...(args.artist ? { artist: args.artist } : {}),
+				...(args.keyGuess ? { key: normalizeAccidentals(args.keyGuess) } : {}),
+				rawInput: serializeRows(importedRows),
+				rows: importedRows,
+				barsPerLine: barsPL,
+				...(Object.keys(bassLines).length > 0 ? { bassLines } : {}),
+				categories: [],
+				fitSinglePage: true,
+				schemaVersion: 4,
+				...(args.sourceUrl ? { sourceUrl: args.sourceUrl } : {}),
+				...(args.capo !== undefined ? { capo: args.capo } : {})
+			},
+			authState.user.uid
+		);
+		goto(`/song/${id}`);
 	}
 
 	// ───── Manuelt flow (folde-ud) ────────────────────────────────────────────
@@ -132,6 +277,7 @@
 					barsPerLine,
 					...(Object.keys(bassLines).length > 0 ? { bassLines } : {}),
 					categories,
+					fitSinglePage: true,
 					schemaVersion: 4
 				},
 				authState.user.uid
@@ -177,7 +323,7 @@
 			bind:value={query}
 			onkeydown={onSearchKey}
 			disabled={fetching}
-			placeholder="fx Baby Blue — eller indsæt en ultimate-guitar.com URL"
+			placeholder="fx Harvest Moon — eller indsæt en ultimate-guitar.com URL"
 			class="mt-2 w-full rounded-[var(--radius-button)] border border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-4 py-3 text-[var(--color-ink-on-dark)] placeholder:text-[var(--color-ink-faint)] focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-50"
 		/>
 
@@ -188,7 +334,7 @@
 			bind:value={artistQuery}
 			onkeydown={onSearchKey}
 			disabled={fetching}
-			placeholder="fx Badfinger"
+			placeholder="fx Neil Young"
 			class="mt-2 w-full rounded-[var(--radius-button)] border border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-4 py-3 text-[var(--color-ink-on-dark)] placeholder:text-[var(--color-ink-faint)] focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-50"
 		/>
 
@@ -213,6 +359,119 @@
 		{/if}
 	</section>
 
+	<section class="card mt-6 p-6">
+		<h2 class="font-display text-xl font-bold text-[var(--color-accent)]">
+			Installér UG-import-knap
+		</h2>
+		<p class="mt-1 text-sm text-[var(--color-ink-muted)]">
+			Træk knappen op i browserens bookmark-linje én gang. Når du står på en konkret
+			Ultimate Guitar chord-side, klikker du den for at sende sangen direkte hertil.
+		</p>
+		<div class="mt-4 flex flex-wrap items-center gap-3">
+			<a
+				href={ugBookmarkletHref}
+				class="bookmarklet-button"
+				onclick={(e) => e.preventDefault()}
+				aria-label="Træk denne knap til bookmark-linjen"
+			>
+				Send til Fællesbandet
+			</a>
+			<span class="text-xs text-[var(--color-ink-faint)]">
+				Tip: vis bookmark-linjen med Cmd+Shift+B i Chrome/Safari.
+			</span>
+		</div>
+	</section>
+
+	{#if paste}
+		<!-- Paste-fallback: UG-siden er allerede åbnet i ny tab. -->
+		<section class="card mt-6 p-6">
+			<header class="mb-4 flex items-start justify-between gap-4">
+				<div>
+					<h2 class="font-display text-xl font-bold text-[var(--color-accent)]">
+						Hent chord-blokken fra Ultimate Guitar
+					</h2>
+					<p class="mt-1 text-sm text-[var(--color-ink-faint)]">
+						Vi åbnede siden for dig. Markér chord+lyric-blokken (Cmd+A inde i
+						blokken), kopiér (Cmd+C), kom tilbage og paste her — så importerer
+						vi den som var det fra UG direkte.
+					</p>
+				</div>
+				<button
+					type="button"
+					class="text-sm text-[var(--color-ink-faint)] hover:text-[var(--color-accent)]"
+					onclick={() => (paste = null)}
+				>
+					Luk ✕
+				</button>
+			</header>
+
+			<div class="paste-grid">
+				<div class="paste-left">
+					<label for="paste-title" class="form-label">Titel</label>
+					<input
+						id="paste-title"
+						type="text"
+						bind:value={paste.title}
+						class="paste-input"
+					/>
+					<label for="paste-artist" class="form-label mt-3 block">Kunstner</label>
+					<input
+						id="paste-artist"
+						type="text"
+						bind:value={paste.artist}
+						class="paste-input"
+					/>
+					<div class="mt-4 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-3 text-xs">
+						<div class="mb-1 font-semibold text-[var(--color-ink-faint)]">
+							UG-side ({paste.stage === 'tab' ? 'fundet sang' : 'søgning'}):
+						</div>
+						<a
+							href={paste.ugUrl}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="break-all text-[var(--color-accent)] underline"
+						>
+							{paste.ugUrl}
+						</a>
+						<button
+							type="button"
+							class="mt-2 block text-[var(--color-ink-faint)] underline hover:text-[var(--color-accent)]"
+							onclick={() => openUgInNewTab(paste!.ugUrl)}
+						>
+							Åbn igen
+						</button>
+					</div>
+				</div>
+				<div class="paste-right">
+					<label for="paste-raw" class="form-label">
+						Akkorder + tekst fra UG <span class="req">*</span>
+					</label>
+					<textarea
+						id="paste-raw"
+						bind:this={pasteAreaEl}
+						bind:value={paste.rawText}
+						rows="14"
+						placeholder="[Intro]&#10;Em   G   D   A7sus4&#10;&#10;[Verse 1]&#10;Em       G&#10;Today is gonna be the day…"
+						class="paste-textarea"
+					></textarea>
+					{#if paste.error}
+						<p class="mt-2 text-sm text-[var(--color-error)]">{paste.error}</p>
+					{/if}
+					<div class="mt-3 flex items-center justify-end gap-3">
+						<button
+							type="button"
+							class="btn-primary"
+							disabled={paste.importing || paste.rawText.trim().length === 0}
+							onclick={handlePasteImport}
+						>
+							{paste.importing ? 'Importerer…' : 'Importér sangen'}
+						</button>
+					</div>
+				</div>
+			</div>
+		</section>
+	{/if}
+
 	<!-- Manuelt flow — folder ud kun hvis der er behov -->
 	<section class="mt-6">
 		<details bind:open={manualOpen} class="manual-details">
@@ -233,6 +492,7 @@
 					{barsPerLine}
 					{categories}
 					{knownCategories}
+					categoryColors={effectiveCategoryColorMap}
 					onChange={onMetaChange}
 				/>
 
@@ -316,5 +576,68 @@
 	}
 	.manual-details[open] > summary::before {
 		transform: rotate(90deg);
+	}
+	.paste-grid {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+		gap: 1.25rem;
+	}
+	@media (max-width: 720px) {
+		.paste-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+	.paste-input {
+		width: 100%;
+		margin-top: 0.4rem;
+		border-radius: var(--radius-button);
+		border: 1px solid var(--color-border);
+		background: var(--color-bg-elevated);
+		padding: 0.6rem 0.8rem;
+		color: var(--color-ink-on-dark);
+	}
+	.paste-input:focus {
+		outline: none;
+		border-color: var(--color-accent);
+	}
+	.paste-textarea {
+		width: 100%;
+		margin-top: 0.4rem;
+		min-height: 22rem;
+		border-radius: var(--radius-button);
+		border: 1px dashed var(--color-border);
+		background: #ffffff;
+		color: #111;
+		padding: 0.9rem 1rem;
+		font-family: var(--font-mono);
+		font-size: 0.9rem;
+		line-height: 1.35;
+		resize: vertical;
+	}
+	.paste-textarea:focus {
+		outline: none;
+		border-color: var(--color-accent);
+		border-style: solid;
+	}
+	.bookmarklet-button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		border-radius: 999px;
+		border: 1px solid #f2d2a8;
+		background: #fcead2;
+		color: #824817;
+		padding: 0.55rem 0.9rem;
+		font-weight: 800;
+		box-shadow: 0 2px 8px rgba(130, 72, 23, 0.12);
+		cursor: grab;
+	}
+	.bookmarklet-button::before {
+		content: '+';
+		font-size: 1.1rem;
+		line-height: 1;
+	}
+	.bookmarklet-button:active {
+		cursor: grabbing;
 	}
 </style>

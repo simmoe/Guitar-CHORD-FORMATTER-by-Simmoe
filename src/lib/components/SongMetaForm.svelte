@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { colorForCategory } from '$lib/categoryColors';
+	import type { CategoryColorMap } from '$lib/types';
+
 	interface Props {
 		title: string;
 		artist: string;
@@ -7,6 +10,7 @@
 		categories: string[];
 		/** Eksisterende kendte kategorier på tværs af sangbogen — bruges til datalist. */
 		knownCategories: string[];
+		categoryColors?: CategoryColorMap;
 		onChange: (next: {
 			title: string;
 			artist: string;
@@ -23,6 +27,7 @@
 		barsPerLine,
 		categories,
 		knownCategories,
+		categoryColors = {},
 		onChange
 	}: Props = $props();
 
@@ -126,7 +131,13 @@
 		{#if categories.length > 0}
 			<div class="mt-2 flex flex-wrap gap-1.5">
 				{#each categories as cat (cat)}
-					<span class="cat-tag">
+					{@const c = colorForCategory(cat, categoryColors)}
+					<span
+						class="cat-tag"
+						style:background={c.bg}
+						style:color={c.text}
+						style:border-color={c.border}
+					>
 						{cat}
 						<button
 							type="button"
@@ -189,6 +200,7 @@
 		border-radius: 999px;
 		background: var(--color-accent-soft);
 		color: #92400e;
+		border: 1px solid transparent;
 		font-size: 0.78rem;
 		font-weight: 600;
 	}

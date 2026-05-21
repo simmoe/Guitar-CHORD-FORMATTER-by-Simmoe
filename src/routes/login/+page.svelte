@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import { authState } from '$lib/auth.svelte';
 	import { BAND } from '$lib/data/band';
 
@@ -7,9 +8,11 @@
 	let password = $state('');
 	let busy = $state(false);
 	let error = $state('');
+	const nextPath =
+		browser ? new URLSearchParams(location.search).get('next') || '/songbook' : '/songbook';
 
 	$effect(() => {
-		if (!authState.loading && authState.user) goto('/songbook');
+		if (!authState.loading && authState.user) goto(nextPath);
 	});
 
 	$effect(() => {
