@@ -11,6 +11,7 @@
 		/** Eksisterende kendte kategorier på tværs af sangbogen — bruges til datalist. */
 		knownCategories: string[];
 		categoryColors?: CategoryColorMap;
+		onRegroupAllBassLines?: (targetBars: 2 | 4) => void;
 		onChange: (next: {
 			title: string;
 			artist: string;
@@ -28,6 +29,7 @@
 		categories,
 		knownCategories,
 		categoryColors = {},
+		onRegroupAllBassLines,
 		onChange
 	}: Props = $props();
 
@@ -99,17 +101,13 @@
 		/>
 	</label>
 
-	<label class="field">
-		<span>Takter pr. linje</span>
-		<select
-			bind:value={barsPerLine}
-			onchange={() => emit({ barsPerLine })}
-		>
-			<option value={2}>2</option>
-			<option value={4}>4</option>
-			<option value={8}>8</option>
-		</select>
-	</label>
+	<div class="field">
+		<span>Baslinjer</span>
+		<div class="bass-bars-actions" aria-label="Gruppér alle baslinjer">
+			<button type="button" title="Komprimér alle baslinjer parvist" onclick={() => onRegroupAllBassLines?.(2)}>2</button>
+			<button type="button" title="Udvid alle baslinjer parvist" onclick={() => onRegroupAllBassLines?.(4)}>4</button>
+		</div>
+	</div>
 
 	<div class="field sm:col-span-2">
 		<span>Kategorier <em class="text-[var(--color-ink-faint)] font-normal text-xs">(koncerter, fx Summertime, Forår, Julen)</em></span>
@@ -169,7 +167,6 @@
 		color: var(--color-error);
 	}
 	.field input,
-	.field select,
 	.cat-input-wrap input {
 		width: 100%;
 		padding: 0.55rem 0.75rem;
@@ -180,7 +177,6 @@
 		font-size: 0.95rem;
 	}
 	.field input:focus,
-	.field select:focus,
 	.cat-input-wrap input:focus {
 		outline: none;
 		border-color: var(--color-accent);
@@ -188,6 +184,25 @@
 	.cat-input-wrap {
 		display: flex;
 		gap: 0.5rem;
+	}
+	.bass-bars-actions {
+		display: inline-flex;
+		gap: 0.25rem;
+	}
+	.bass-bars-actions button {
+		display: grid;
+		place-items: center;
+		width: 2.25rem;
+		min-height: 2.2rem;
+		border-radius: var(--radius-button);
+		border: 1px solid rgba(255, 255, 255, 0.28);
+		background: #16a34a;
+		color: #ffffff;
+		font-weight: 900;
+		cursor: pointer;
+	}
+	.bass-bars-actions button:hover {
+		background: #15803d;
 	}
 	.cat-input-wrap input {
 		flex: 1 1 auto;

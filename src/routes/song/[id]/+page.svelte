@@ -18,6 +18,7 @@
 		decodeHtmlEntities
 	} from '$lib/chordFormatter';
 	import { parseRows, serializeRows, transposeRows, type Row } from '$lib/songParse';
+	import { regroupBassLine } from '$lib/migrate';
 	import EditableSong from '$lib/components/EditableSong.svelte';
 	import SongMetaForm from '$lib/components/SongMetaForm.svelte';
 	import { exportSongsAsPdf } from '$lib/pdf';
@@ -193,6 +194,19 @@
 	}
 
 	function onBassLinesChange(next: BassLines) {
+		bassLines = next;
+		scheduleSave();
+	}
+
+	function regroupAllBassLines(targetBars: 2 | 4) {
+		const next: BassLines = {};
+		let changed = false;
+		for (const [key, line] of Object.entries(bassLines)) {
+			const regrouped = regroupBassLine(line, targetBars);
+			if (regrouped) next[key] = regrouped;
+			if (regrouped !== line) changed = true;
+		}
+		if (!changed) return;
 		bassLines = next;
 		scheduleSave();
 	}
@@ -420,12 +434,13 @@
 						{categories}
 						{knownCategories}
 						categoryColors={effectiveCategoryColorMap}
+						onRegroupAllBassLines={regroupAllBassLines}
 						onChange={onMetaChange}
 					/>
 				</div>
 			</details>
 
-			<div class="song-area" class:no-bass-tabs={!withBassTabs}>
+			<div class="song-area">
 				<EditableSong
 					{rows}
 					{barsPerLine}

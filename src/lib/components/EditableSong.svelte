@@ -22,6 +22,7 @@
 		renderBarLine,
 		sectionHeaderType
 	} from '$lib/chordFormatter';
+	import { normalizeBassLine, regroupBassLine as regroupSingleBassLine } from '$lib/migrate';
 	import type { BassLines, CollapsedSections } from '$lib/types';
 	import { tick } from 'svelte';
 
@@ -136,9 +137,14 @@
 			if (!Number.isFinite(r)) continue;
 			if (dropRange && r >= dropRange[0] && r < dropRange[1]) continue;
 			const newR = r >= start ? r + delta : r;
-			out[String(newR)] = v;
+			out[String(newR)] = normalizeBassLine(v);
 		}
-		if (JSON.stringify(out) !== JSON.stringify(bassLines)) onBassLinesChange?.(out);
+		if (JSON.stringify(out) !== JSON.stringify(bassLines)) emitBassLines(out);
+	}
+
+	function emitBassLines(next: BassLines) {
+		bassLines = next;
+		onBassLinesChange?.(next);
 	}
 
 	function deleteSection(headerIdx: number) {
@@ -184,15 +190,15 @@
 			if (!Number.isFinite(r)) continue;
 			if (r >= tgtStart && r < tgtEnd) continue; // gamle target-linjer ryddes
 			const newR = r >= tgtEnd ? r + delta : r;
-			out[String(newR)] = v;
+			out[String(newR)] = normalizeBassLine(v);
 		}
 		const offset = tgtStart - src.bodyStart;
 		for (let i = 0; i < srcRows.length; i++) {
 			const srcRowIdx = src.bodyStart + i;
 			const v = bassLines[String(srcRowIdx)];
-			if (v) out[String(srcRowIdx + offset)] = v;
+			if (v) out[String(srcRowIdx + offset)] = normalizeBassLine(v);
 		}
-		if (JSON.stringify(out) !== JSON.stringify(bassLines)) onBassLinesChange?.(out);
+		if (JSON.stringify(out) !== JSON.stringify(bassLines)) emitBassLines(out);
 	}
 
 	function chordRowIndicesInSection(start: number, end: number): number[] {
@@ -207,6 +213,15 @@
 		const src = findPreviousSameType(sections, headerIdx);
 		if (!src) return false;
 		return chordRowIndicesInSection(src.bodyStart, src.bodyEnd).length > 0;
+	}
+
+	/**
+	 * Find display-rækken hvor bassen for chord-rækken `chordIdx` ligger.
+	 * Hvis chorden efterfølges af en lyric, sidder bassen på lyric-rækken;
+	 * ellers på chord-rækken selv.
+	 */
+	function bassRowForChordRow(rs: Row[], chordIdx: number): number {
+		return rs[chordIdx + 1]?.kind === 'lyric' ? chordIdx + 1 : chordIdx;
 	}
 
 	function copyChordsAndBassFromPreviousSameType(headerIdx: number) {
@@ -224,19 +239,23 @@
 		let changed = false;
 		const count = Math.min(srcChordRows.length, targetChordRows.length);
 		for (let i = 0; i < count; i++) {
-			const srcRow = rows[srcChordRows[i]];
-			const targetIdx = targetChordRows[i];
-			const targetRow = rows[targetIdx];
+			const srcChordIdx = srcChordRows[i];
+			const targetChordIdx = targetChordRows[i];
+			const srcRow = rows[srcChordIdx];
+			const targetRow = rows[targetChordIdx];
 			if (srcRow?.kind === 'chord' && targetRow?.kind === 'chord' && srcRow.text !== targetRow.text) {
-				nextRows[targetIdx] = { ...targetRow, text: srcRow.text };
+				nextRows[targetChordIdx] = { ...targetRow, text: srcRow.text };
 				changed = true;
 			}
 
-			const srcLine = bassLines[String(srcChordRows[i])];
-			const targetKey = String(targetIdx);
-			if (srcLine?.trim()) {
-				if (next[targetKey] !== srcLine) {
-					next[targetKey] = srcLine;
+			const srcBassRow = bassRowForChordRow(rows, srcChordIdx);
+			const targetBassRow = bassRowForChordRow(nextRows, targetChordIdx);
+			const srcLine = bassLines[String(srcBassRow)];
+			const normalizedSrcLine = srcLine?.trim() ? normalizeBassLine(srcLine) : '';
+			const targetKey = String(targetBassRow);
+			if (normalizedSrcLine) {
+				if (next[targetKey] !== normalizedSrcLine) {
+					next[targetKey] = normalizedSrcLine;
 					changed = true;
 				}
 			} else if (next[targetKey]) {
@@ -246,7 +265,7 @@
 		}
 		if (!changed) return;
 		emit(nextRows);
-		onBassLinesChange(next);
+		emitBassLines(next);
 	}
 
 	function moveSection(sourceHeaderIdx: number, targetHeaderIdx: number) {
@@ -283,10 +302,10 @@
 		for (const [k, v] of Object.entries(bassLines)) {
 			const oldIdx = Number(k);
 			const newIdx = oldToNew.get(oldIdx);
-			if (newIdx !== undefined) movedBassLines[String(newIdx)] = v;
+			if (newIdx !== undefined) movedBassLines[String(newIdx)] = normalizeBassLine(v);
 		}
 		if (JSON.stringify(movedBassLines) !== JSON.stringify(bassLines)) {
-			onBassLinesChange?.(movedBassLines);
+			emitBassLines(movedBassLines);
 		}
 
 		if (onCollapsedSectionsChange) {
@@ -551,23 +570,38 @@
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
-	// Bass-line lookup: hvilken chord-row "ejer" bass-linjen for række i?
-	// Hvis i er en lyric umiddelbart efter en chord, så er det chord-rækken
-	// ovenover. Ellers ingen.
+	// Bass-linjer er 1-til-1 med visningsrækken: `bassLines[i]` er
+	// bas-linjen for række `i`. Header-rækker har aldrig en baslinje;
+	// alle andre (chord, lyric, blank) kan have en. Migrationen i
+	// `migrate.ts` flytter gamle keys fra chord-row til lyric-row hvis
+	// chorden efterfølges af lyrics, så denne forenklede invariant
+	// holder for alle eksisterende sange.
 	// ──────────────────────────────────────────────────────────────────────
-	function chordRowAbove(i: number): number | null {
-		if (i <= 0) return null;
-		const cur = rows[i];
-		if (cur?.kind !== 'lyric') return null;
-		const prev = rows[i - 1];
-		if (prev?.kind !== 'chord') return null;
-		return i - 1;
+	function canHaveBass(i: number): boolean {
+		return rows[i]?.kind !== 'header';
 	}
 
 	function bassHtmlFor(rowIdx: number): string {
 		const line = bassLines[String(rowIdx)];
 		if (!line || line.trim() === '') return '';
 		return renderBarLine(line);
+	}
+
+	/**
+	 * Init-tekst når brugeren starter en helt ny baslinje på række `i`.
+	 * - chord-row: brug rækkens egen tekst som udgangspunkt.
+	 * - lyric-row: brug chord-rækken umiddelbart ovenover, hvis findes.
+	 * - blank-row: ingen kilde — start blot på `|  |`.
+	 */
+	function initialBassFor(i: number): string {
+		const row = rows[i];
+		if (!row) return '|  |';
+		if (row.kind === 'chord') return normalizeBassLine(row.text) || '|  |';
+		if (row.kind === 'lyric') {
+			const prev = rows[i - 1];
+			if (prev?.kind === 'chord') return normalizeBassLine(prev.text) || '|  |';
+		}
+		return '|  |';
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
@@ -596,21 +630,43 @@
 		chordModal = null;
 	}
 
-	function openBassModal(rowIdx: number) {
-		const row = rows[rowIdx];
-		if (!row || row.kind !== 'chord') return;
-		bassModal = { rowIdx, value: bassLines[String(rowIdx)] ?? '' };
+	/**
+	 * Åbn baslinje-modalen for række `i`. Hvis der allerede findes en
+	 * baslinje, åbnes den til redigering. Ellers oprettes en ny ud fra
+	 * `initialBassFor(i)` og skrives straks ind i `bassLines`, så højre
+	 * kolonne får synligt indhold (også hvis brugeren afbryder modalen).
+	 */
+	function openOrStartBassModal(rowIdx: number) {
+		if (!onBassLinesChange) return;
+		if (!canHaveBass(rowIdx)) return;
+		const existing = bassLines[String(rowIdx)];
+		if (existing?.trim()) {
+			bassModal = { rowIdx, value: existing };
+			return;
+		}
+		const value = initialBassFor(rowIdx);
+		emitBassLines({ ...bassLines, [String(rowIdx)]: value });
+		bassModal = { rowIdx, value };
 	}
 
 	function saveBassModal() {
 		if (!bassModal || !onBassLinesChange) return;
-		const trimmed = normalizeAccidentals(bassModal.value.trim());
+		const trimmed = normalizeBassLine(bassModal.value);
 		const k = String(bassModal.rowIdx);
 		const next: BassLines = { ...bassLines };
 		if (trimmed === '') delete next[k];
 		else next[k] = trimmed;
-		onBassLinesChange(next);
+		emitBassLines(next);
 		bassModal = null;
+	}
+
+	function regroupBassLine(rowIdx: number, targetBars: 2 | 4): void {
+		if (!onBassLinesChange) return;
+		const line = bassLines[String(rowIdx)];
+		if (!line) return;
+		const nextLine = regroupSingleBassLine(line, targetBars);
+		if (nextLine === line) return;
+		emitBassLines({ ...bassLines, [String(rowIdx)]: nextLine });
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
@@ -624,6 +680,7 @@
 
 	function onLineDragStart(e: DragEvent, rowIdx: number, col: DragCol) {
 		if (!e.dataTransfer) return;
+		hideRowToolbar();
 		e.dataTransfer.effectAllowed = 'copy';
 		e.dataTransfer.setData('application/x-chord-line', JSON.stringify({ rowIdx, col }));
 		const r = rows[rowIdx];
@@ -682,7 +739,7 @@
 		if (!onBassLinesChange) return;
 		const srcLine = bassLines[String(srcIdx)];
 		if (!srcLine || !srcLine.trim()) return;
-		onBassLinesChange({ ...bassLines, [String(tgtIdx)]: srcLine });
+		emitBassLines({ ...bassLines, [String(tgtIdx)]: normalizeBassLine(srcLine) });
 	}
 
 	function onSectionDragStart(e: DragEvent, headerIdx: number) {
@@ -732,7 +789,8 @@
 		hoveredRow = rowIdx;
 		const rowEl = e.currentTarget as HTMLElement;
 		const rowRect = rowEl.getBoundingClientRect();
-		const toolbarWidth = 128;
+		const hasBass = canHaveBass(rowIdx) && !!bassLines[String(rowIdx)]?.trim();
+		const toolbarWidth = hasBass ? 180 : 128;
 		const cursorGap = 12;
 		const viewportPadding = 8;
 		hoverToolbar = {
@@ -770,6 +828,30 @@
 		class="row-gutter"
 		aria-hidden="true"
 	></div>
+{/snippet}
+
+{#snippet bassCell(i: number)}
+	{@const hasBass = !!bassLines[String(i)]?.trim()}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<div
+		class="rhythm-cell rhythm-cell-clickable"
+		class:rhythm-cell-empty={!hasBass}
+		class:drop-target={dropTarget?.rowIdx === i && dropTarget?.col === 'bass'}
+		class:drag-source={dragInfo?.rowIdx === i && dragInfo?.col === 'bass'}
+		title={readOnly ? undefined : hasBass ? 'Klik for at redigere · træk for at kopiere bass-linjen' : 'Klik for at starte en baslinje'}
+		draggable={readOnly || !hasBass ? 'false' : 'true'}
+		onmouseenter={readOnly ? undefined : hideRowToolbar}
+		onmousedown={readOnly ? undefined : hideRowToolbar}
+		ondragstart={readOnly || !hasBass ? undefined : (e) => onLineDragStart(e, i, 'bass')}
+		ondragend={readOnly ? undefined : onLineDragEnd}
+		ondragover={readOnly ? undefined : (e) => onLineDragOver(e, i, 'bass')}
+		ondragleave={readOnly ? undefined : () => onLineDragLeave(i, 'bass')}
+		ondrop={readOnly ? undefined : (e) => onLineDrop(e, i, 'bass')}
+		onclick={readOnly ? undefined : () => { hideRowToolbar(); openOrStartBassModal(i); }}
+	>
+		{#if hasBass}{@html bassHtmlFor(i)}{:else}&nbsp;{/if}
+	</div>
 {/snippet}
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -884,6 +966,16 @@
 					</div>
 				{/if}
 			</div>
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="section-header-echo"
+				aria-hidden="true"
+				onmouseenter={readOnly ? undefined : hideRowToolbar}
+			>
+				<span class="section-header section-header--{sectionHeaderType(row.text)}">
+					{cleanSectionHeader(row.text)}
+				</span>
+			</div>
 		{:else if isRowHidden(i)}
 			<!-- skjult af kollapset sektion -->
 		{:else if row.kind === 'blank' || row.kind === 'lyric'}
@@ -900,45 +992,19 @@
 				onblur={readOnly ? undefined : () => onCellBlur(i)}
 				onkeydown={readOnly ? undefined : (e) => onCellKeydown(e, i)}
 				onpaste={readOnly ? undefined : (e) => onCellPaste(e, i)}
-					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
-					onfocus={readOnly ? undefined : hideRowToolbar}
-					onclick={readOnly ? undefined : hideRowToolbar}
+				onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
+				onfocus={readOnly ? undefined : hideRowToolbar}
+				onclick={readOnly ? undefined : hideRowToolbar}
 				role={readOnly ? 'presentation' : 'textbox'}
 				tabindex={readOnly ? undefined : 0}
 				aria-label={readOnly ? undefined : row.kind === 'blank' ? 'Tom linje' : 'Tekst-linje'}
 			></div>
-			{@const bassChordIdx = chordRowAbove(i)}
-			{#if bassChordIdx !== null}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
-				<div
-					class="rhythm-cell rhythm-cell-clickable"
-					class:drop-target={dropTarget?.rowIdx === bassChordIdx && dropTarget?.col === 'bass'}
-					class:drag-source={dragInfo?.rowIdx === bassChordIdx && dragInfo?.col === 'bass'}
-					title={readOnly ? undefined : 'Klik for at redigere · træk for at kopiere bass-linjen'}
-					draggable={readOnly ? 'false' : 'true'}
-					ondragstart={readOnly ? undefined : (e) => onLineDragStart(e, bassChordIdx, 'bass')}
-					ondragend={readOnly ? undefined : onLineDragEnd}
-					ondragover={readOnly ? undefined : (e) => onLineDragOver(e, bassChordIdx, 'bass')}
-					ondragleave={readOnly ? undefined : () => onLineDragLeave(bassChordIdx, 'bass')}
-					ondrop={readOnly ? undefined : (e) => onLineDrop(e, bassChordIdx, 'bass')}
-					onclick={readOnly ? undefined : () => { hideRowToolbar(); openBassModal(bassChordIdx); }}
-					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
-				>
-					{@html bassHtmlFor(bassChordIdx)}
-				</div>
-			{:else}
-				<div
-					class="rhythm-cell"
-					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
-				></div>
-			{/if}
+			{@render bassCell(i)}
 		{:else if row.kind === 'chord'}
 			{@render rowGutter(i)}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<!-- svelte-ignore a11y_click_events_have_key_events -->
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-			{@const hasLyricBelow = rows[i + 1]?.kind === 'lyric'}
 			<div
 				class="lyrics-cell chord-cell chord-cell-clickable"
 				class:drop-target={dropTarget?.rowIdx === i && dropTarget?.col === 'chord'}
@@ -946,6 +1012,7 @@
 				data-row={i}
 				title={readOnly ? undefined : 'Klik for at redigere · træk for at kopiere til en anden linje'}
 				draggable={readOnly ? 'false' : 'true'}
+				onmousedown={readOnly ? undefined : hideRowToolbar}
 				ondragstart={readOnly ? undefined : (e) => onLineDragStart(e, i, 'chord')}
 				ondragend={readOnly ? undefined : onLineDragEnd}
 				ondragover={readOnly ? undefined : (e) => onLineDragOver(e, i, 'chord')}
@@ -957,31 +1024,7 @@
 				tabindex={readOnly ? undefined : 0}
 				aria-label={readOnly ? undefined : `Rediger akkord-linje for række ${i + 1}`}
 			>{#if row.text.trim()}{@html renderBarLine(row.text)}{:else}&nbsp;{/if}</div>
-			{#if hasLyricBelow}
-				<div
-					class="rhythm-cell"
-					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
-				></div>
-			{:else}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
-				<div
-					class="rhythm-cell rhythm-cell-clickable"
-					class:drop-target={dropTarget?.rowIdx === i && dropTarget?.col === 'bass'}
-					class:drag-source={dragInfo?.rowIdx === i && dragInfo?.col === 'bass'}
-					title={readOnly ? undefined : 'Klik for at redigere · træk for at kopiere bass-linjen'}
-					draggable={readOnly ? 'false' : 'true'}
-					ondragstart={readOnly ? undefined : (e) => onLineDragStart(e, i, 'bass')}
-					ondragend={readOnly ? undefined : onLineDragEnd}
-					ondragover={readOnly ? undefined : (e) => onLineDragOver(e, i, 'bass')}
-					ondragleave={readOnly ? undefined : () => onLineDragLeave(i, 'bass')}
-					ondrop={readOnly ? undefined : (e) => onLineDrop(e, i, 'bass')}
-					onclick={readOnly ? undefined : () => { hideRowToolbar(); openBassModal(i); }}
-					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
-				>
-					{@html bassHtmlFor(i)}
-				</div>
-			{/if}
+			{@render bassCell(i)}
 		{/if}
 	{/each}
 </div>
@@ -989,6 +1032,7 @@
 {#if hoverToolbar && !readOnly}
 	{@const toolbarRowIdx = hoverToolbar.rowIdx}
 	{@const currentKind = rowKindToOption(rows[toolbarRowIdx])}
+	{@const hasToolbarBass = canHaveBass(toolbarRowIdx) && !!bassLines[String(toolbarRowIdx)]?.trim()}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="floating-row-toolbar"
@@ -999,6 +1043,16 @@
 		onmouseleave={hideRowToolbarSoon}
 	>
 		<div class="gutter-toolbar-row">
+			<button
+				type="button"
+				class="gutter-btn del-btn"
+				title="Slet linje (⌘⇧K)"
+				aria-label="Slet linje"
+				onmousedown={(e) => e.preventDefault()}
+				onclick={() => deleteRow(toolbarRowIdx)}
+			>
+				×
+			</button>
 		{#if currentKind !== null}
 				<select
 					class="gutter-btn gutter-kind"
@@ -1014,6 +1068,28 @@
 					<option value="form">Form</option>
 				</select>
 		{/if}
+			{#if hasToolbarBass}
+				<button
+					type="button"
+					class="gutter-btn bass-bars-btn"
+					title="Komprimér baslinjen parvist"
+					aria-label="Komprimér baslinjen parvist"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => regroupBassLine(toolbarRowIdx, 2)}
+				>
+					2
+				</button>
+				<button
+					type="button"
+					class="gutter-btn bass-bars-btn"
+					title="Udvid baslinjen parvist"
+					aria-label="Udvid baslinjen parvist"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => regroupBassLine(toolbarRowIdx, 4)}
+				>
+					4
+				</button>
+			{/if}
 			<button
 				type="button"
 				class="gutter-btn gutter-insert"
@@ -1023,16 +1099,6 @@
 				onclick={() => insertRowAbove(toolbarRowIdx)}
 			>
 				↑
-			</button>
-			<button
-				type="button"
-				class="gutter-btn del-btn"
-				title="Slet linje (⌘⇧K)"
-				aria-label="Slet linje"
-				onmousedown={(e) => e.preventDefault()}
-				onclick={() => deleteRow(toolbarRowIdx)}
-			>
-				×
 			</button>
 		</div>
 	</div>
@@ -1133,19 +1199,30 @@
 		content: '' !important;
 	}
 	.editable-song.chord-grid {
-		grid-template-columns: minmax(0, 1fr) max-content;
-		column-gap: 4.2em;
+		grid-template-columns: minmax(0, 1fr) minmax(8em, max-content);
+		column-gap: 2em;
 	}
-	.editable-song.chord-grid > * + .rhythm-cell {
-		justify-self: end;
+	.editable-song.chord-grid > .rhythm-cell {
+		justify-self: stretch;
+		text-align: right;
 		margin-left: 0;
 	}
 	.editable-song.chord-grid :global(.section-header-cell) {
-		grid-column: 1 / -1;
+		grid-column: 1;
 		display: flex;
 		align-items: center;
 		gap: 0.4em;
 		border-radius: 999px;
+		min-width: 0;
+	}
+	.editable-song .section-header-echo {
+		justify-self: end;
+		align-self: center;
+		text-align: right;
+		pointer-events: auto;
+	}
+	.editable-song .section-header-echo .section-header {
+		opacity: 0.7;
 	}
 	.editable-song:not(.read-only) .section-header-cell {
 		cursor: grab;
@@ -1282,6 +1359,24 @@
 		outline: 2px solid #dc2626;
 		outline-offset: 1px;
 	}
+	.floating-row-toolbar .bass-bars-btn {
+		display: grid;
+		place-items: center;
+		padding: 0;
+		background: #16a34a;
+		color: #ffffff;
+		border: 1px solid rgba(255, 255, 255, 0.28);
+		border-radius: 0.35em;
+		font-size: 0.78em;
+		font-weight: 900;
+		line-height: 1;
+		width: 1.45em;
+		height: 1.35em;
+	}
+	.floating-row-toolbar .bass-bars-btn:hover {
+		background: #15803d;
+		color: #ffffff;
+	}
 	.editable-song .gutter-kind {
 		appearance: none;
 		-webkit-appearance: none;
@@ -1353,6 +1448,12 @@
 		padding: 0 0.15rem;
 		min-height: 1.2em;
 		transition: background-color 100ms ease, box-shadow 100ms ease, opacity 100ms ease;
+	}
+	.editable-song .rhythm-cell-clickable,
+	.editable-song .rhythm-cell-clickable :global(*),
+	.editable-song .chord-cell-clickable,
+	.editable-song .chord-cell-clickable :global(*) {
+		cursor: pointer;
 	}
 	.editable-song .chord-cell-clickable:hover,
 	.editable-song .chord-cell-clickable:focus-visible,

@@ -175,6 +175,9 @@ select {
 	color: var(--color-chord);
 	font-weight: 600;
 }
+.chord-grid .rhythm-cell .bass-chord {
+	display: inline;
+}
 .chord-grid .lyrics-cell {
 	font-weight: 700;
 }
@@ -380,6 +383,10 @@ select {
 .pdf-chord .bass-chord {
 	color: var(--color-chord);
 	font-weight: 400;
+}
+.pdf-bass .bass-chord {
+	display: inline-block;
+	min-width: 2.2ch;
 }
 .pdf-spacer {
 	letter-spacing: 0;

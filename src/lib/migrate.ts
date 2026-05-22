@@ -55,7 +55,99 @@ type LegacySong = SongDoc & {
  * derefter v3 → v4 (populér `rows` fra `rawInput`).
  */
 export function migrateSong(input: SongDoc): SongDoc {
-	return migrateToV4(migrateToV3(input));
+	return migrateBassKeysToDisplayRow(
+		normalizeSongBassLines(migrateToV4(migrateToV3(input)))
+	);
+}
+
+/**
+ * Bass-linjer skal sidde på den række hvor de faktisk vises (1-til-1).
+ * Gamle dokumenter har bassen på chord-rækkens index, men hvis chord
+ * efterfølges af en lyric, viser editoren og PDF'en bassen på
+ * lyric-rækken. Vi flytter derfor key fra chord-row til lyric-row én
+ * gang ved load. Idempotent: hvis bassen allerede ligger på lyric-rækken,
+ * eller chord-rækken ikke har lyric under sig, sker der intet.
+ */
+export function migrateBassKeysToDisplayRow(input: SongDoc): SongDoc {
+	if (!input.bassLines || !input.rows) return input;
+	const rows = input.rows;
+	const next: BassLines = {};
+	for (const [k, v] of Object.entries(input.bassLines)) {
+		const i = Number(k);
+		if (!Number.isFinite(i)) continue;
+		const here = rows[i];
+		if (here?.kind === 'header') continue;
+		const below = rows[i + 1];
+		const targetIdx = here?.kind === 'chord' && below?.kind === 'lyric' ? i + 1 : i;
+		const targetKey = String(targetIdx);
+		if (!(targetKey in next)) next[targetKey] = v;
+	}
+	if (
+		Object.keys(next).length === Object.keys(input.bassLines).length &&
+		Object.entries(next).every(([k, v]) => input.bassLines?.[k] === v)
+	) {
+		return input;
+	}
+	return {
+		...input,
+		bassLines: Object.keys(next).length > 0 ? next : undefined
+	};
+}
+
+export function normalizeBassLine(line: string): string {
+	const normalized = normalizeAccidentals(line.replace(/\u00a0/g, ' ').trim());
+	if (!normalized) return '';
+	const tokens = normalized.split(/\s+/).filter(Boolean);
+	const withoutEdgeBars = tokens.filter((token, index) => {
+		if (token !== '|') return true;
+		return index !== 0 && index !== tokens.length - 1;
+	});
+	if (withoutEdgeBars.length === 0) return '';
+	return `| ${withoutEdgeBars.join(' ')} |`;
+}
+
+export function normalizeSongBassLines(input: SongDoc): SongDoc {
+	if (!input.bassLines) return input;
+	const bassLines: BassLines = {};
+	for (const [key, line] of Object.entries(input.bassLines)) {
+		const normalized = normalizeBassLine(line);
+		if (normalized) bassLines[key] = normalized;
+	}
+	return {
+		...input,
+		bassLines: Object.keys(bassLines).length > 0 ? bassLines : undefined
+	};
+}
+
+export function regroupBassLine(line: string, targetBars: 2 | 4): string {
+	const normalizedLine = normalizeBassLine(line);
+	if (!normalizedLine) return '';
+	const barGroups = normalizedLine
+		.split('|')
+		.map((group) => group.trim())
+		.filter(Boolean);
+	if (barGroups.length === 0) return '';
+
+	if (targetBars === 4) {
+		const expanded = barGroups.flatMap((group) => {
+			const groupTokens = group.split(/\s+/).filter(Boolean);
+			return groupTokens.length <= 1 ? [group, group] : groupTokens;
+		});
+		return normalizeBassLine(expanded.join(' | '));
+	}
+
+	const groups: string[] = [];
+	for (let i = 0; i < barGroups.length; i += 2) {
+		const first = barGroups[i];
+		const second = barGroups[i + 1];
+		if (!second) {
+			groups.push(first);
+			continue;
+		}
+		groups.push(first === second ? first : `${first} ${second}`);
+	}
+
+	return normalizeBassLine(groups.map((group) => group.trim()).filter(Boolean).join(' | '));
 }
 
 /**
@@ -89,7 +181,10 @@ export function inferBassLinesForImportedRows(
 		const next = rows[i + 1];
 		const lyric = next?.kind === 'lyric' ? next.text : '';
 		const auto = legacyComputeBassLine(row.text, lyric, barsPerLine, {}, i);
-		if (auto.trim() !== '') out[String(i)] = auto;
+		const normalized = normalizeBassLine(auto);
+		if (!normalized) continue;
+		const targetIdx = next?.kind === 'lyric' ? i + 1 : i;
+		out[String(targetIdx)] = normalized;
 	}
 	return out;
 }

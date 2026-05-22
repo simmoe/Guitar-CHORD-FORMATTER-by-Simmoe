@@ -68,11 +68,6 @@
 			});
 	}
 
-	function chordRowAbove(rowIdx: number): number | null {
-		const prev = rows[rowIdx - 1];
-		return prev?.kind === 'chord' ? rowIdx - 1 : null;
-	}
-
 	function bassHtmlFor(rowIdx: number): string {
 		const line = bassLines[String(rowIdx)];
 		return line?.trim() ? renderPrintableBarLine(line) : '';
@@ -111,18 +106,13 @@
 						{#each section.rows as item}
 							{#if item.row.kind === 'blank'}
 								<div class="pdf-line pdf-line--blank"></div>
-								<div class="pdf-bass pdf-line--blank"></div>
+								<div class="pdf-bass pdf-line--blank">{@html bassHtmlFor(item.rowIdx)}</div>
 							{:else if item.row.kind === 'chord'}
 								<div class="pdf-line pdf-chord">{@html renderPrintableBarLine(item.row.text)}</div>
-								<div class="pdf-bass">
-									{#if rows[item.rowIdx + 1]?.kind !== 'lyric'}{@html bassHtmlFor(item.rowIdx)}{/if}
-								</div>
+								<div class="pdf-bass">{@html bassHtmlFor(item.rowIdx)}</div>
 							{:else if item.row.kind === 'lyric'}
-								{@const bassChordIdx = chordRowAbove(item.rowIdx)}
 								<div class="pdf-line pdf-lyric">{item.row.text}</div>
-								<div class="pdf-bass">
-									{#if bassChordIdx !== null}{@html bassHtmlFor(bassChordIdx)}{/if}
-								</div>
+								<div class="pdf-bass">{@html bassHtmlFor(item.rowIdx)}</div>
 							{/if}
 						{/each}
 					</div>
