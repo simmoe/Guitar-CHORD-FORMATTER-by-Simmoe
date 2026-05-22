@@ -47,6 +47,7 @@
 	}: Props = $props();
 
 	let hoveredRow = $state<number | null>(null);
+	let hoverToolbar = $state<{ rowIdx: number; top: number; left: number; width: number } | null>(null);
 	let rows = $state<Row[]>([]);
 	let lastEmitted = $state<Row[] | null>(null);
 
@@ -726,6 +727,33 @@
 		});
 	}
 
+	function showRowToolbar(e: MouseEvent, rowIdx: number): void {
+		if (readOnly) return;
+		hoveredRow = rowIdx;
+		const rowEl = e.currentTarget as HTMLElement;
+		const rowRect = rowEl.getBoundingClientRect();
+		const toolbarWidth = 128;
+		hoverToolbar = {
+			rowIdx,
+			top: Math.max(8, rowRect.top - 4),
+			left: rowRect.right + 4,
+			width: toolbarWidth
+		};
+	}
+
+	function hideRowToolbar(): void {
+		hoverToolbar = null;
+		hoveredRow = null;
+	}
+
+	function hideRowToolbarSoon(): void {
+		requestAnimationFrame(() => {
+			if (document.querySelector('.floating-row-toolbar:hover')) return;
+			hoverToolbar = null;
+			hoveredRow = null;
+		});
+	}
+
 	// Fælles hint vist i begge modaler.
 	const MODAL_HINT = 'Skriv linjen som du vil have den. Brug `|` mellem takter, mellemrum mellem akkorder i samme takt, og `-` for et tomt slag. Fx `C | F - G | Am - - -`.';
 </script>
@@ -735,46 +763,8 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="row-gutter"
-		onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
-	>
-		{#if hoveredRow === i && !readOnly}
-			<button
-				type="button"
-				class="gutter-btn gutter-insert"
-				title="Indsæt tom linje ovenover"
-				aria-label="Indsæt linje ovenover"
-				onmousedown={(e) => e.preventDefault()}
-				onclick={() => insertRowAbove(i)}
-			>
-				↑
-			</button>
-			<button
-				type="button"
-				class="gutter-btn del-btn"
-				title="Slet linje (⌘⇧K)"
-				aria-label="Slet linje"
-				onmousedown={(e) => e.preventDefault()}
-				onclick={() => deleteRow(i)}
-			>
-				×
-			</button>
-			{#if currentKind !== null}
-				<select
-					class="gutter-btn gutter-kind"
-					aria-label="Linjetype"
-					title="Linjetype"
-					value={currentKind}
-					onmousedown={(e) => e.stopPropagation()}
-					onchange={(e) =>
-						changeRowKind(i, (e.currentTarget as HTMLSelectElement).value as LineKind)}
-				>
-					<option value="chord">Akkord</option>
-					<option value="lyric">Lyrics</option>
-					<option value="form">Form</option>
-				</select>
-			{/if}
-		{/if}
-	</div>
+		aria-hidden="true"
+	></div>
 {/snippet}
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -785,7 +775,7 @@
 	role={readOnly ? 'presentation' : 'textbox'}
 	aria-multiline={readOnly ? undefined : 'true'}
 	tabindex={readOnly ? undefined : -1}
-	onmouseleave={readOnly ? undefined : () => (hoveredRow = null)}
+		onmouseleave={readOnly ? undefined : hideRowToolbarSoon}
 >
 	{#each rows as row, i (i)}
 		{#if row.kind === 'header'}
@@ -903,7 +893,9 @@
 				onblur={readOnly ? undefined : () => onCellBlur(i)}
 				onkeydown={readOnly ? undefined : (e) => onCellKeydown(e, i)}
 				onpaste={readOnly ? undefined : (e) => onCellPaste(e, i)}
-				onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
+					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
+					onfocus={readOnly ? undefined : hideRowToolbar}
+					onclick={readOnly ? undefined : hideRowToolbar}
 				role={readOnly ? 'presentation' : 'textbox'}
 				tabindex={readOnly ? undefined : 0}
 				aria-label={readOnly ? undefined : row.kind === 'blank' ? 'Tom linje' : 'Tekst-linje'}
@@ -923,15 +915,15 @@
 					ondragover={readOnly ? undefined : (e) => onLineDragOver(e, bassChordIdx, 'bass')}
 					ondragleave={readOnly ? undefined : () => onLineDragLeave(bassChordIdx, 'bass')}
 					ondrop={readOnly ? undefined : (e) => onLineDrop(e, bassChordIdx, 'bass')}
-					onclick={readOnly ? undefined : () => openBassModal(bassChordIdx)}
-					onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
+					onclick={readOnly ? undefined : () => { hideRowToolbar(); openBassModal(bassChordIdx); }}
+					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
 				>
 					{@html bassHtmlFor(bassChordIdx)}
 				</div>
 			{:else}
 				<div
 					class="rhythm-cell"
-					onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
+					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
 				></div>
 			{/if}
 		{:else if row.kind === 'chord'}
@@ -952,8 +944,8 @@
 				ondragover={readOnly ? undefined : (e) => onLineDragOver(e, i, 'chord')}
 				ondragleave={readOnly ? undefined : () => onLineDragLeave(i, 'chord')}
 				ondrop={readOnly ? undefined : (e) => onLineDrop(e, i, 'chord')}
-				onclick={readOnly ? undefined : () => openChordModal(i)}
-				onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
+				onclick={readOnly ? undefined : () => { hideRowToolbar(); openChordModal(i); }}
+				onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
 				role={readOnly ? 'presentation' : 'button'}
 				tabindex={readOnly ? undefined : 0}
 				aria-label={readOnly ? undefined : `Rediger akkord-linje for række ${i + 1}`}
@@ -961,7 +953,7 @@
 			{#if hasLyricBelow}
 				<div
 					class="rhythm-cell"
-					onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
+					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
 				></div>
 			{:else}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -977,8 +969,8 @@
 					ondragover={readOnly ? undefined : (e) => onLineDragOver(e, i, 'bass')}
 					ondragleave={readOnly ? undefined : () => onLineDragLeave(i, 'bass')}
 					ondrop={readOnly ? undefined : (e) => onLineDrop(e, i, 'bass')}
-					onclick={readOnly ? undefined : () => openBassModal(i)}
-					onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
+					onclick={readOnly ? undefined : () => { hideRowToolbar(); openBassModal(i); }}
+					onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
 				>
 					{@html bassHtmlFor(i)}
 				</div>
@@ -986,6 +978,60 @@
 		{/if}
 	{/each}
 </div>
+
+{#if hoverToolbar && !readOnly}
+	{@const toolbarRowIdx = hoverToolbar.rowIdx}
+	{@const currentKind = rowKindToOption(rows[toolbarRowIdx])}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="floating-row-toolbar"
+		style:top={`${hoverToolbar.top}px`}
+		style:left={`${hoverToolbar.left}px`}
+		style:width={`${hoverToolbar.width}px`}
+		onmouseenter={() => (hoveredRow = hoverToolbar?.rowIdx ?? null)}
+		onmouseleave={hideRowToolbarSoon}
+	>
+		<div class="gutter-action-row">
+			<button
+				type="button"
+				class="gutter-btn gutter-insert"
+				title="Indsæt tom linje ovenover"
+				aria-label="Indsæt linje ovenover"
+				onmousedown={(e) => e.preventDefault()}
+				onclick={() => insertRowAbove(toolbarRowIdx)}
+			>
+				↑
+			</button>
+			<button
+				type="button"
+				class="gutter-btn del-btn"
+				title="Slet linje (⌘⇧K)"
+				aria-label="Slet linje"
+				onmousedown={(e) => e.preventDefault()}
+				onclick={() => deleteRow(toolbarRowIdx)}
+			>
+				×
+			</button>
+		</div>
+		{#if currentKind !== null}
+			<div class="gutter-kind-row">
+				<select
+					class="gutter-btn gutter-kind"
+					aria-label="Linjetype"
+					title="Linjetype"
+					value={currentKind}
+					onmousedown={(e) => e.stopPropagation()}
+					onchange={(e) =>
+						changeRowKind(toolbarRowIdx, (e.currentTarget as HTMLSelectElement).value as LineKind)}
+				>
+					<option value="chord">Akkord</option>
+					<option value="lyric">Lyrics</option>
+					<option value="form">Form</option>
+				</select>
+			</div>
+		{/if}
+	</div>
+{/if}
 
 {#if (chordModal || bassModal) && !readOnly}
 	{@const isBass = !!bassModal}
@@ -1061,6 +1107,7 @@
 <style>
 	.editable-song {
 		min-height: 4rem;
+		position: relative;
 	}
 	.editable-song.read-only,
 	.editable-song.read-only :global(*) {
@@ -1081,14 +1128,15 @@
 		content: '' !important;
 	}
 	.editable-song.chord-grid {
-		grid-template-columns: 6.4em minmax(0, 1fr) auto;
-		column-gap: 0.6em;
+		grid-template-columns: minmax(0, 1fr) max-content;
+		column-gap: 4.2em;
 	}
 	.editable-song.chord-grid > * + .rhythm-cell {
-		margin-left: clamp(1.5em, 15vw, 12em);
+		justify-self: end;
+		margin-left: 0;
 	}
 	.editable-song.chord-grid :global(.section-header-cell) {
-		grid-column: 2 / -1;
+		grid-column: 1 / -1;
 		display: flex;
 		align-items: center;
 		gap: 0.4em;
@@ -1168,24 +1216,45 @@
 		margin-left: 0.2em;
 	}
 	.editable-song .row-gutter {
-		grid-column: 1;
+		display: none;
+	}
+	.floating-row-toolbar {
+		position: fixed;
+		z-index: 500;
+		padding: 3px;
+		border-radius: 0.35em;
+		background: rgba(15, 23, 42, 0.78);
+		box-shadow: 0 6px 18px rgba(15, 23, 42, 0.28);
+		backdrop-filter: blur(3px);
+		color: #ffffff;
+	}
+	.editable-song .gutter-action-row,
+	.editable-song .gutter-kind-row,
+	.floating-row-toolbar .gutter-action-row,
+	.floating-row-toolbar .gutter-kind-row {
 		display: flex;
-		align-items: flex-start;
-		justify-content: flex-end;
-		gap: 0.15em;
-		min-width: 6.4em;
-		min-height: 1.2em;
-		padding-top: 0.05em;
+		justify-content: center;
+		gap: 4px;
+		width: 100%;
+	}
+	.floating-row-toolbar .gutter-action-row {
+		justify-content: space-evenly;
+	}
+	.floating-row-toolbar .gutter-kind {
+		color: #ffffff;
+		border-color: rgba(255, 255, 255, 0.28);
+		background-color: rgba(255, 255, 255, 0.08);
+		width: 100%;
 	}
 	.editable-song .gutter-btn {
 		appearance: none;
 		background: transparent;
 		border: 0;
 		padding: 0;
-		width: 1.2em;
-		height: 1.2em;
+		width: 1.45em;
+		height: 1.35em;
 		line-height: 1;
-		font-size: 1.05em;
+		font-size: 0.9em;
 		font-weight: 700;
 		color: var(--color-ink-faint, #9ca3af);
 		cursor: pointer;
@@ -1218,16 +1287,16 @@
 		background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
 			linear-gradient(135deg, currentColor 50%, transparent 50%);
 		background-position:
-			calc(100% - 9px) 55%,
-			calc(100% - 5px) 55%;
-		background-size: 4px 4px, 4px 4px;
+			calc(100% - 7px) 55%,
+			calc(100% - 4px) 55%;
+		background-size: 3px 3px, 3px 3px;
 		background-repeat: no-repeat;
 		border: 1px solid var(--color-border-subtle, rgba(0, 0, 0, 0.12));
-		padding: 0 1.6em 0 0.55em;
+		padding: 0 1.2em 0 0.35em;
 		width: auto;
-		height: 1.5em;
-		min-width: 4.4em;
-		font-size: 0.7em;
+		height: 1.45em;
+		min-width: 0;
+		font-size: 0.68em;
 		font-weight: 600;
 		font-family: inherit;
 		color: var(--color-ink-muted, #6b7280);
@@ -1307,6 +1376,8 @@
 	}
 	.editable-song .lyric-cell {
 		font-weight: 700;
+		white-space: pre-wrap;
+		overflow-wrap: break-word;
 	}
 
 	/* ── Modal ─────────────────────────────────────────────────────── */

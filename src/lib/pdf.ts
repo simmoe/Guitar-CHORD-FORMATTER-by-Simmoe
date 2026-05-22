@@ -119,8 +119,14 @@ function sectionBreaksForCanvas(pageEl: HTMLElement, canvas: HTMLCanvasElement):
 	const breaks = new Set<number>([0, canvas.height]);
 	for (const section of pageEl.querySelectorAll<HTMLElement>('.pdf-song-section')) {
 		const rect = section.getBoundingClientRect();
-		const top = Math.max(0, Math.round((rect.top - pageRect.top) * scaleY));
-		const bottom = Math.min(canvas.height, Math.round((rect.bottom - pageRect.top) * scaleY));
+		const label = section.querySelector<HTMLElement>('.pdf-section-label');
+		const labelRect = label?.getBoundingClientRect();
+		// Section labels sit slightly above the section border; include their
+		// visual bounds so a page slice cannot cut the label in half.
+		const visualTop = labelRect ? Math.min(rect.top, labelRect.top) : rect.top;
+		const visualBottom = labelRect ? Math.max(rect.bottom, labelRect.bottom) : rect.bottom;
+		const top = Math.max(0, Math.round((visualTop - pageRect.top) * scaleY));
+		const bottom = Math.min(canvas.height, Math.round((visualBottom - pageRect.top) * scaleY));
 		if (top > 0) breaks.add(top);
 		if (bottom > 0 && bottom < canvas.height) breaks.add(bottom);
 	}

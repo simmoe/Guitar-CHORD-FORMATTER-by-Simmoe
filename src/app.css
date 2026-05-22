@@ -366,6 +366,9 @@ select {
 .pdf-line,
 .pdf-bass {
 	min-width: 0;
+}
+.pdf-chord,
+.pdf-bass {
 	white-space: pre;
 }
 .pdf-chord,
@@ -386,6 +389,8 @@ select {
 	font-size: calc(9.2pt * var(--pdf-layout-scale));
 	line-height: calc(1.12 * var(--pdf-layout-scale));
 	font-weight: 700;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
 }
 .pdf-line--blank {
 	min-height: calc(0.14cm * var(--pdf-layout-scale));
