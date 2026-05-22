@@ -733,10 +733,15 @@
 		const rowEl = e.currentTarget as HTMLElement;
 		const rowRect = rowEl.getBoundingClientRect();
 		const toolbarWidth = 128;
+		const cursorGap = 12;
+		const viewportPadding = 8;
 		hoverToolbar = {
 			rowIdx,
 			top: Math.max(8, rowRect.top - 4),
-			left: rowRect.right + 4,
+			left: Math.min(
+				window.innerWidth - toolbarWidth - viewportPadding,
+				Math.max(viewportPadding, e.clientX + cursorGap)
+			),
 			width: toolbarWidth
 		};
 	}
@@ -794,7 +799,7 @@
 				ondragover={readOnly || headerIdx < 0 ? undefined : (e) => onSectionDragOver(e, headerIdx)}
 				ondragleave={readOnly || headerIdx < 0 ? undefined : () => onSectionDragLeave(headerIdx)}
 				ondrop={readOnly || headerIdx < 0 ? undefined : (e) => onSectionDrop(e, headerIdx)}
-				onmouseenter={readOnly ? undefined : () => (hoveredRow = i)}
+				onmouseenter={readOnly ? undefined : (e) => showRowToolbar(e, i)}
 			>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<div
@@ -807,6 +812,8 @@
 					onblur={readOnly ? undefined : () => onCellBlur(i)}
 					onkeydown={readOnly ? undefined : (e) => onCellKeydown(e, i)}
 					onpaste={readOnly ? undefined : (e) => onCellPaste(e, i)}
+					onfocus={readOnly ? undefined : hideRowToolbar}
+					onclick={readOnly ? undefined : hideRowToolbar}
 					role={readOnly ? 'presentation' : 'textbox'}
 					tabindex={readOnly ? undefined : 0}
 					aria-label={readOnly ? undefined : 'Sektionsnavn'}
@@ -991,7 +998,22 @@
 		onmouseenter={() => (hoveredRow = hoverToolbar?.rowIdx ?? null)}
 		onmouseleave={hideRowToolbarSoon}
 	>
-		<div class="gutter-action-row">
+		<div class="gutter-toolbar-row">
+		{#if currentKind !== null}
+				<select
+					class="gutter-btn gutter-kind"
+					aria-label="Linjetype"
+					title="Linjetype"
+					value={currentKind}
+					onmousedown={(e) => e.stopPropagation()}
+					onchange={(e) =>
+						changeRowKind(toolbarRowIdx, (e.currentTarget as HTMLSelectElement).value as LineKind)}
+				>
+					<option value="chord">Akkord</option>
+					<option value="lyric">Lyrics</option>
+					<option value="form">Form</option>
+				</select>
+		{/if}
 			<button
 				type="button"
 				class="gutter-btn gutter-insert"
@@ -1013,23 +1035,6 @@
 				×
 			</button>
 		</div>
-		{#if currentKind !== null}
-			<div class="gutter-kind-row">
-				<select
-					class="gutter-btn gutter-kind"
-					aria-label="Linjetype"
-					title="Linjetype"
-					value={currentKind}
-					onmousedown={(e) => e.stopPropagation()}
-					onchange={(e) =>
-						changeRowKind(toolbarRowIdx, (e.currentTarget as HTMLSelectElement).value as LineKind)}
-				>
-					<option value="chord">Akkord</option>
-					<option value="lyric">Lyrics</option>
-					<option value="form">Form</option>
-				</select>
-			</div>
-		{/if}
 	</div>
 {/if}
 
@@ -1227,34 +1232,31 @@
 		box-shadow: 0 6px 18px rgba(15, 23, 42, 0.28);
 		backdrop-filter: blur(3px);
 		color: #ffffff;
+		cursor: pointer;
 	}
-	.editable-song .gutter-action-row,
-	.editable-song .gutter-kind-row,
-	.floating-row-toolbar .gutter-action-row,
-	.floating-row-toolbar .gutter-kind-row {
+	.floating-row-toolbar .gutter-toolbar-row {
 		display: flex;
-		justify-content: center;
-		gap: 4px;
+		align-items: center;
+		justify-content: space-between;
+		gap: 5px;
 		width: 100%;
-	}
-	.floating-row-toolbar .gutter-action-row {
-		justify-content: space-evenly;
 	}
 	.floating-row-toolbar .gutter-kind {
 		color: #ffffff;
 		border-color: rgba(255, 255, 255, 0.28);
 		background-color: rgba(255, 255, 255, 0.08);
-		width: 100%;
+		flex: 1 1 auto;
+		cursor: pointer;
 	}
 	.editable-song .gutter-btn {
 		appearance: none;
 		background: transparent;
 		border: 0;
 		padding: 0;
-		width: 1.45em;
-		height: 1.35em;
+		width: 1.75em;
+		height: 1.55em;
 		line-height: 1;
-		font-size: 0.9em;
+		font-size: 0.95em;
 		font-weight: 700;
 		color: var(--color-ink-faint, #9ca3af);
 		cursor: pointer;
@@ -1294,9 +1296,9 @@
 		border: 1px solid var(--color-border-subtle, rgba(0, 0, 0, 0.12));
 		padding: 0 1.2em 0 0.35em;
 		width: auto;
-		height: 1.45em;
+		height: 1.65em;
 		min-width: 0;
-		font-size: 0.68em;
+		font-size: 0.72em;
 		font-weight: 600;
 		font-family: inherit;
 		color: var(--color-ink-muted, #6b7280);
