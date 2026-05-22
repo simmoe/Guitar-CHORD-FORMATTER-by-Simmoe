@@ -359,7 +359,7 @@ select {
 }
 .pdf-section-grid {
 	display: grid;
-	grid-template-columns: minmax(0, 145mm) max-content;
+	grid-template-columns: minmax(0, 1fr) max-content;
 	column-gap: calc(10mm * var(--pdf-layout-scale));
 	align-items: baseline;
 }
