@@ -437,6 +437,22 @@ function buildLegacyBars(chordLine: string, refLine: string, barsPerLine: number
 		return bars;
 	}
 
+	if (isSlotFormat(chordLine)) {
+		const tokens = chordLine.trim().split(/\s+/).filter(Boolean);
+		const slotsPerBar = Math.max(1, Math.ceil(tokens.length / barsPerLine));
+		const bars: string[][] = [];
+		let current: string | null = null;
+		for (let b = 0; b < barsPerLine; b++) bars.push([]);
+		for (let i = 0; i < tokens.length; i++) {
+			const token = tokens[i];
+			if (CHORD_TOK.test(token)) current = chordToBassName(token);
+			const barIdx = Math.min(Math.floor(i / slotsPerBar), barsPerLine - 1);
+			if (current && bars[barIdx].length === 0) bars[barIdx].push(current);
+		}
+		fillEmpty(bars);
+		return bars;
+	}
+
 	const chordsWithPos: { name: string; pos: number }[] = [];
 	let m: RegExpExecArray | null;
 	CHORD_RX.lastIndex = 0;

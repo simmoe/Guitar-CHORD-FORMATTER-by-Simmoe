@@ -42,6 +42,7 @@ function cleanUgContent(s: string): string {
 function stripTrailingUgJunk(text: string): string {
 	const chordToken = '[A-G][#b]?(?:m|maj|min|dim|sus|add)?\\d?';
 	const junkPatterns: RegExp[] = [
+		/^\s*\*+\s+(?:it\s+has\s+been\s+suggested|suggested|note|notes?|this\s+song|you\s+can|thanks?|please|rate)\b/i,
 		/^\s*Capo\s+(?:I+|VI*|IX|X|\d+)\s*$/i,
 		new RegExp(`^\\s*${chordToken}\\s*=\\s*${chordToken}\\s*$`),
 		/^\s*\*+\s*Alternates?\b/i,
@@ -104,7 +105,7 @@ export function normalizeBookmarkletPayload(data: unknown): UgBookmarkletPayload
 		version: 1,
 		title: payload.title?.trim() || 'Untitled',
 		artist: payload.artist?.trim() ?? '',
-		rawInput: payload.rawInput,
+		rawInput: cleanUgContent(decodeHtmlEntities(payload.rawInput)),
 		sourceUrl: payload.sourceUrl ?? '',
 		...(payload.keyGuess ? { keyGuess: payload.keyGuess } : {}),
 		...(payload.tuning ? { tuning: payload.tuning } : {}),

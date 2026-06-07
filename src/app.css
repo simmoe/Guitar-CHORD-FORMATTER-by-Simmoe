@@ -183,7 +183,7 @@ select {
 }
 .chord-grid .section-header-cell {
 	grid-column: 1 / -1;
-	margin: 0.5rem 0 0.25rem;
+	margin: 0;
 }
 .chord-grid .section-header-cell--collapsed .section-header {
 	opacity: 0.7;
@@ -320,15 +320,15 @@ select {
 }
 .pdf-song-sections {
 	display: grid;
-	gap: calc(0.16cm * var(--pdf-layout-scale));
+	gap: 0;
 }
 .pdf-song-section {
 	--section-accent: #6b7280;
 	position: relative;
 	border: 0.75pt solid var(--section-accent);
 	border-radius: 7px;
-	margin-top: calc(0.06cm * var(--pdf-layout-scale));
-	padding: calc(0.16cm * var(--pdf-layout-scale)) calc(0.22cm * var(--pdf-layout-scale)) calc(0.14cm * var(--pdf-layout-scale));
+	margin-top: 0;
+	padding: calc(0.08cm * var(--pdf-layout-scale)) calc(0.18cm * var(--pdf-layout-scale)) calc(0.08cm * var(--pdf-layout-scale));
 	break-inside: avoid;
 	background: transparent;
 }
@@ -338,7 +338,7 @@ select {
 	padding: calc(0.08cm * var(--pdf-layout-scale)) calc(0.22cm * var(--pdf-layout-scale)) !important;
 }
 .pdf-song-section--unlabeled {
-	padding-top: calc(0.12cm * var(--pdf-layout-scale));
+	padding-top: calc(0.06cm * var(--pdf-layout-scale));
 }
 .pdf-song-section--compact .pdf-section-label {
 	position: static;
@@ -348,14 +348,14 @@ select {
 	padding: 0;
 }
 .pdf-section-label {
-	position: absolute;
-	top: -0.58em;
-	left: 0.28cm;
-	background: #ffffff;
+	position: static;
+	display: block;
+	background: transparent;
 	color: var(--section-accent);
-	padding: 0 0.34rem;
+	padding: 0;
+	margin: 0;
 	font-size: calc(8pt * var(--pdf-layout-scale));
-	line-height: 1;
+	line-height: calc(1.05 * var(--pdf-layout-scale));
 	font-weight: 800;
 	letter-spacing: 0.05em;
 	text-transform: uppercase;
@@ -500,14 +500,14 @@ select {
 		color: #000 !important;
 	}
 	.chord-grid .section-header-cell {
-		margin: 0.18cm 0 0.06cm !important;
+		margin: 0 !important;
 		page-break-after: avoid;
 	}
 	.chord-grid .section-header {
 		background: #e5e7eb !important;
 		color: #000 !important;
 		font-size: 9.5pt !important;
-		padding: 0.06cm 0.3cm !important;
+		padding: 0.02cm 0.22cm !important;
 		print-color-adjust: exact;
 		-webkit-print-color-adjust: exact;
 	}

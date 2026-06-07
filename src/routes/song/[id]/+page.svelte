@@ -21,7 +21,7 @@
 	import { regroupBassLine } from '$lib/migrate';
 	import EditableSong from '$lib/components/EditableSong.svelte';
 	import SongMetaForm from '$lib/components/SongMetaForm.svelte';
-	import { exportSongsAsPdf } from '$lib/pdf';
+	import { exportAudienceSongbookAsPdf, exportSongsAsPdf } from '$lib/pdf';
 	import { assignMissingCategoryColors, hasSameCategoryColors } from '$lib/categoryColors';
 	import type {
 		BassLines,
@@ -274,6 +274,7 @@
 	);
 
 	let pdfBusy = $state(false);
+	let audiencePdfBusy = $state(false);
 
 	async function handlePdf() {
 		if (pdfBusy || !song) return;
@@ -291,6 +292,25 @@
 			alert('Kunne ikke generere PDF — se konsollen for detaljer.');
 		} finally {
 			pdfBusy = false;
+		}
+	}
+
+	async function handleAudiencePdf() {
+		if (audiencePdfBusy || !song) return;
+		await flushPendingSave();
+		audiencePdfBusy = true;
+		try {
+			if (!liveSongForExport) return;
+			const exportTitle = title.trim() || song.title || 'Sang';
+			await exportAudienceSongbookAsPdf([liveSongForExport], {
+				title: exportTitle,
+				filename: `${exportTitle} - tekst`
+			});
+		} catch (err) {
+			console.error('Publikums-PDF fejlede:', err);
+			alert('Kunne ikke generere publikums-PDF — se konsollen for detaljer.');
+		} finally {
+			audiencePdfBusy = false;
 		}
 	}
 
@@ -396,9 +416,50 @@
 						class="btn-secondary"
 						onclick={handlePdf}
 						disabled={pdfBusy}
-						title="Generér PDF og hent direkte"
+						title="Generér akkord-PDF og hent direkte"
 					>
-						{pdfBusy ? 'Genererer…' : 'PDF'}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+							><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle
+								cx="18"
+								cy="16"
+								r="3"
+							></circle></svg
+						>
+						{pdfBusy ? 'Genererer…' : 'Akkorder'}
+					</button>
+					<button
+						type="button"
+						class="btn-secondary"
+						onclick={handleAudiencePdf}
+						disabled={audiencePdfBusy}
+						title="Generér publikums-PDF uden akkorder"
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+							><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path
+								d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"
+							></path><path d="M8 7h8"></path><path d="M8 11h7"></path></svg
+						>
+						{audiencePdfBusy ? 'Genererer…' : 'Tekst'}
 					</button>
 					<button
 						type="button"

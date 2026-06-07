@@ -24,9 +24,16 @@ export function normalizeAccidentals(text: string): string {
 
 /** Sand hvis linjen er en akkord-only linje (med eller uden pipes). */
 export function isChordLine(line: string): boolean {
-	const stripped = line.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
+	const stripped = normalizeChordLineMarkers(line).replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
 	if (!stripped) return false;
 	return chordOnlyLineRegex.test(stripped);
+}
+
+function normalizeChordLineMarkers(line: string): string {
+	return line
+		.replace(/\*/g, '')
+		.replace(/(^|\s)\+(?=\s|$)/g, ' ')
+		.replace(/([A-G][#b]?(?:[majsudigotb0-9#\+\-\(\)\^∆°ø]*)(?:\/[A-G][#b]?)?)\+(?=\s|$)/g, '$1');
 }
 
 // ============================================================================
@@ -48,7 +55,7 @@ export function isChordLine(line: string): boolean {
  */
 export function renderBarLine(line: string, transpose: number = 0): string {
 	if (!line || line.trim() === '') return '';
-	const tokens = line.trim().split(/\s+/);
+	const tokens = normalizeChordLineMarkers(line).trim().split(/\s+/);
 	const out: string[] = [];
 	let prevWasBar = false;
 	for (const tok of tokens) {
@@ -243,7 +250,7 @@ export function decodeHtmlEntities(text: string): string {
  * `normalizeAccidentals`.
  */
 function transposeChordsInLine(line: string, semitones: number): string {
-	return line.replace(new RegExp(CHORD_PATTERN, 'g'), (chord) => {
+	return normalizeChordLineMarkers(line).replace(new RegExp(CHORD_PATTERN, 'g'), (chord) => {
 		const transposed = transposeChord(chord, semitones);
 		if (transposed.length === chord.length) return transposed;
 		if (transposed.length < chord.length) {

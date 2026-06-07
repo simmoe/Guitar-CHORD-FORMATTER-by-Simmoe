@@ -341,14 +341,21 @@
 		<div class="mt-5 flex justify-end">
 			<button
 				type="button"
-				class="btn-primary !text-base"
+				class="btn-primary find-button !text-base"
+				class:loading={fetching}
 				style="padding: 0.75rem 2rem;"
 				disabled={fetching || query.trim().length === 0}
 				onclick={handleAutoFetch}
 			>
-				{fetching ? 'Henter…' : 'Find'}
+				{#if fetching}<span class="find-spinner" aria-hidden="true"></span>{/if}
+				{fetching ? 'Finder akkorder…' : 'Find'}
 			</button>
 		</div>
+		{#if fetching}
+			<p class="mt-3 text-right text-xs text-[var(--color-ink-faint)]">
+				Søger på Ultimate Guitar. Hvis den bliver blokeret, åbner vi paste-flowet automatisk.
+			</p>
+		{/if}
 
 		{#if fetchError}
 			<div
@@ -558,6 +565,23 @@
 	.paste-area-wrap:focus-within {
 		border-color: var(--color-accent);
 		border-style: solid;
+	}
+	.find-button.loading {
+		position: relative;
+		opacity: 0.92;
+	}
+	.find-spinner {
+		width: 1rem;
+		height: 1rem;
+		border-radius: 999px;
+		border: 2px solid rgba(255, 255, 255, 0.45);
+		border-top-color: #ffffff;
+		animation: spin 800ms linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 	.manual-details > summary {
 		list-style: none;

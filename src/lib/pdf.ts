@@ -16,8 +16,11 @@
 import html2canvas from 'html2canvas-pro';
 import jsPDF from 'jspdf';
 import { mount, unmount, tick } from 'svelte';
+import AudienceSongbook from './components/AudienceSongbook.svelte';
+import ChordSongbookCover from './components/ChordSongbookCover.svelte';
 import PrintableSong from './components/PrintableSong.svelte';
-import type { SongDoc } from './types';
+import { categoryImageDataUrl } from './firebase/images';
+import type { CategoryMeta, SongDoc } from './types';
 
 interface ExportOptions {
 	filename: string;
@@ -26,6 +29,14 @@ interface ExportOptions {
 	scale?: number;
 	imageFormat?: 'png' | 'jpeg';
 	jpegQuality?: number;
+	coverTitle?: string;
+	coverMeta?: CategoryMeta;
+	includeCover?: boolean;
+}
+
+interface AudienceExportOptions extends ExportOptions {
+	title: string;
+	categoryMeta?: CategoryMeta;
 }
 
 const MIN_LAYOUT_SCALE = 0.55;
@@ -70,6 +81,54 @@ function restoreStyles(el: HTMLElement, saved: SavedStyles): void {
 
 async function waitForLayout(): Promise<void> {
 	await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+}
+
+async function waitForImages(root: HTMLElement): Promise<void> {
+	const images = [...root.querySelectorAll<HTMLImageElement>('img')];
+	await Promise.all(
+		images.map(
+			(img) =>
+				new Promise<void>((resolve) => {
+					if (img.complete && img.naturalWidth > 0) {
+						resolve();
+						return;
+					}
+					const done = () => resolve();
+					img.addEventListener('load', done, { once: true });
+					img.addEventListener('error', done, { once: true });
+				})
+		)
+	);
+}
+
+async function urlToDataUrl(url: string | undefined): Promise<string | undefined> {
+	if (!url) return undefined;
+	if (url.startsWith('data:')) return url;
+	try {
+		const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
+		if (!response.ok) return undefined;
+		const blob = await response.blob();
+		return await new Promise<string>((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => resolve(reader.result?.toString() ?? '');
+			reader.onerror = () => reject(reader.error ?? new Error('Kunne ikke læse cover-billede'));
+			reader.readAsDataURL(blob);
+		});
+	} catch (err) {
+		console.warn('Kunne ikke indlejre cover-billede i PDF:', err);
+		return undefined;
+	}
+}
+
+async function inlineCategoryImage(meta: CategoryMeta | undefined): Promise<CategoryMeta | undefined> {
+	if (!meta?.imageUrl) return meta;
+	const imageUrl = meta.imagePath
+		? await categoryImageDataUrl(meta.imagePath).catch((err) => {
+				console.warn('Kunne ikke hente kategori-billede via function:', err);
+				return undefined;
+			})
+		: await urlToDataUrl(meta.imageUrl);
+	return imageUrl ? { ...meta, imageUrl } : meta;
 }
 
 async function applyLayoutScale(
@@ -271,6 +330,25 @@ export async function exportSongsAsPdf(
 
 	const components: ReturnType<typeof mount>[] = [];
 	const pageEls: HTMLElement[] = [];
+	const coverMeta = await inlineCategoryImage(opts.coverMeta);
+	if (opts.includeCover) {
+		const coverDiv = document.createElement('div');
+		coverDiv.style.background = '#ffffff';
+		coverDiv.dataset.fitSinglePage = 'false';
+		coverDiv.classList.add('pdf-snapshot-page');
+		wrapper.appendChild(coverDiv);
+		const cover = mount(ChordSongbookCover, {
+			target: coverDiv,
+			props: {
+				title: opts.coverTitle ?? opts.filename,
+				songCount: songs.length,
+				categoryMeta: coverMeta
+			}
+		});
+		components.push(cover);
+		pageEls.push(coverDiv);
+	}
+
 	for (const song of songs) {
 		const pageDiv = document.createElement('div');
 		pageDiv.style.background = '#ffffff';
@@ -286,11 +364,61 @@ export async function exportSongsAsPdf(
 	// Vent på at Svelte's tick + browser-layout (fonts, grid) er færdig.
 	await tick();
 	await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+	await waitForImages(wrapper);
+	await waitForLayout();
 
 	try {
 		await pagesToPdf(pageEls, opts);
 	} finally {
 		for (const c of components) unmount(c);
+		document.body.removeChild(wrapper);
+	}
+}
+
+export async function exportAudienceSongbookAsPdf(
+	songs: SongDoc[],
+	opts: AudienceExportOptions
+): Promise<void> {
+	if (songs.length === 0) return;
+
+	const wrapper = document.createElement('div');
+	wrapper.style.position = 'fixed';
+	wrapper.style.left = '-10000px';
+	wrapper.style.top = '0';
+	wrapper.style.width = '210mm';
+	wrapper.style.background = '#ffffff';
+	wrapper.style.color = '#000000';
+	wrapper.style.zIndex = '-1';
+	wrapper.classList.add('pdf-snapshot-page');
+	document.body.appendChild(wrapper);
+
+	const pageDiv = document.createElement('div');
+	pageDiv.style.background = '#ffffff';
+	pageDiv.dataset.fitSinglePage = 'false';
+	pageDiv.classList.add('pdf-snapshot-page');
+	wrapper.appendChild(pageDiv);
+	const categoryMeta = await inlineCategoryImage(opts.categoryMeta);
+
+	const component = mount(AudienceSongbook, {
+		target: pageDiv,
+		props: { title: opts.title, songs, categoryMeta }
+	});
+
+	await tick();
+	await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+	await waitForImages(wrapper);
+	await waitForLayout();
+
+	try {
+		const pages = [...pageDiv.querySelectorAll<HTMLElement>('.audience-page')];
+		await pagesToPdf(pages.length > 0 ? pages : [pageDiv], {
+			...opts,
+			fitSinglePage: false,
+			imageFormat: opts.imageFormat ?? 'jpeg',
+			jpegQuality: opts.jpegQuality ?? 0.86
+		});
+	} finally {
+		unmount(component);
 		document.body.removeChild(wrapper);
 	}
 }

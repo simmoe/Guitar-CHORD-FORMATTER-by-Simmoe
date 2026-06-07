@@ -2,6 +2,7 @@ import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, type Auth } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator, type Firestore } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator, type Functions } from 'firebase/functions';
+import { getStorage, connectStorageEmulator, type FirebaseStorage } from 'firebase/storage';
 import { browser } from '$app/environment';
 
 /**
@@ -10,7 +11,7 @@ import { browser } from '$app/environment';
  *
  * Opt-in:
  *  ?emu     → kun Functions går mod emulator (port 5001).
- *  ?fullEmu → Auth, Firestore og Functions går alle mod emulator.
+ *  ?fullEmu → Auth, Firestore, Functions og Storage går alle mod emulator.
  */
 const isLocal =
 	browser && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
@@ -34,6 +35,7 @@ let _app: FirebaseApp | undefined;
 let _auth: Auth | undefined;
 let _db: Firestore | undefined;
 let _functions: Functions | undefined;
+let _storage: FirebaseStorage | undefined;
 
 export function getFirebaseApp(): FirebaseApp {
 	if (_app) return _app;
@@ -66,6 +68,15 @@ export function getFns(): Functions {
 		connectFunctionsEmulator(_functions, 'localhost', 5001);
 	}
 	return _functions;
+}
+
+export function getStorageBucket(): FirebaseStorage {
+	if (_storage) return _storage;
+	_storage = getStorage(getFirebaseApp());
+	if (useFullEmu) {
+		connectStorageEmulator(_storage, 'localhost', 9199);
+	}
+	return _storage;
 }
 
 /**

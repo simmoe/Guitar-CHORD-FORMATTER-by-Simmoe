@@ -9,8 +9,8 @@
  *
  * Søgning: samme js-store-trick — `store.page.data.results` indeholder
  * søgeresultater med type ("Chords", "Tab", etc), url, song_name og
- * artist_name. Vi vælger første resultat af typen "Chords" med højest
- * rating.
+ * artist_name. Vi ranker først efter titel-/kunstner-relevans og bruger
+ * kun rating/stemmer som tie-breaker mellem relevante matches.
  */
 
 /**
@@ -66,6 +66,7 @@ export interface UgFetchErrorDetails {
 }
 
 const UG_URL_REGEX = /^https?:\/\/(www\.)?(tabs\.)?ultimate-guitar\.com\//i;
+const MIN_ACCEPTABLE_MATCH_SCORE = 0.58;
 
 function buildSearchUrl(query: string): string {
 	return `https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(query)}`;
@@ -90,22 +91,21 @@ export async function fetchUg(input: string): Promise<UgFetchResult> {
 		}
 	}
 
-	// To-trins søgning: UG's egen først (giver rating/votes for kvalitets-vægtning),
-	// derefter DuckDuckGo's no-JS HTML som backup (giver bare URL'er, men kommer
-	// igennem fordi DDG ikke er Cloudflare-beskyttet — UG's egen søgeside får
-	// challenge i ~50% af tilfældene lige nu).
+	// UG's egen søgeside/Jina-HTML er langsom og rammer ofte Cloudflare.
+	// Brug DuckDuckGo først; den er stabil fra Cloud Functions IP'er, og URL-
+	// sluggen giver os nok titel/kunstner-data til relevans-ranking.
 	let hits: UgSearchHit[] = [];
 	let searchUrl = buildSearchUrl(trimmed);
 	try {
-		const r = await searchUg(trimmed);
-		hits = r.hits;
-		searchUrl = r.searchUrl;
+		hits = await searchUgViaDuckDuckGo(trimmed);
 	} catch {
-		// UG-søgning fejlede — fald gennem til DDG-fallback nedenfor
+		// DDG fejlede — fald gennem til UG/Jina-søgning nedenfor
 	}
 	if (hits.length === 0) {
 		try {
-			hits = await searchUgViaDuckDuckGo(trimmed);
+			const r = await searchUg(trimmed);
+			hits = r.hits;
+			searchUrl = r.searchUrl;
 		} catch (err) {
 			throw attachDetails(err, { stage: 'search', searchUrl });
 		}
@@ -116,18 +116,21 @@ export async function fetchUg(input: string): Promise<UgFetchResult> {
 			{ stage: 'no-hits', searchUrl }
 		);
 	}
-	const ranked = hits.sort(
-		(a, b) =>
-			b.rating * Math.log10(b.votes + 1) - a.rating * Math.log10(a.votes + 1)
-	);
+	const ranked = rankSearchHits(trimmed, hits);
+	if (ranked.length === 0) {
+		throw attachDetails(
+			new Error('Ingen relevante akkord-resultater fundet på Ultimate Guitar'),
+			{ stage: 'no-hits', searchUrl }
+		);
+	}
 	let lastErr: unknown = null;
-	for (const hit of ranked.slice(0, 5)) {
+	for (const hit of ranked.slice(0, 2)) {
 		try {
 			return await fetchTabPage(hit.url, searchUrl);
 		} catch (err) {
 			lastErr = err;
-			// Næste search-hit kan være en anden version af samme sang hvor Jina's
-			// cached/rendered state faktisk kommer igennem Cloudflare.
+			// Næste relevante search-hit kan være en anden version af samme sang
+			// hvor Jina's cached/rendered state faktisk kommer igennem Cloudflare.
 		}
 	}
 	throw attachDetails(lastErr ?? new Error('Ingen UG-tab kunne hentes'), {
@@ -174,9 +177,10 @@ async function searchUgViaDuckDuckGo(query: string): Promise<UgSearchHit[]> {
 		const tabUrl = path.startsWith('http') ? path : `https://${path}`;
 		if (seen.has(tabUrl)) continue;
 		seen.add(tabUrl);
+		const parsed = parseUgTabUrl(tabUrl);
 		hits.push({
-			title: '',
-			artist: '',
+			title: parsed.title,
+			artist: parsed.artist,
 			url: tabUrl,
 			// DDG giver os ikke rating/votes — vægt alle ens men prioritér rækkefølgen
 			rating: 5 - hits.length * 0.1,
@@ -185,6 +189,19 @@ async function searchUgViaDuckDuckGo(query: string): Promise<UgSearchHit[]> {
 		if (hits.length >= 5) break;
 	}
 	return hits;
+}
+
+function parseUgTabUrl(url: string): { artist: string; title: string } {
+	const match = url.match(/\/tab\/([^/]+)\/([^/]+)-chords-\d+/i);
+	if (!match) return { artist: '', title: '' };
+	return {
+		artist: slugToWords(match[1]),
+		title: slugToWords(match[2])
+	};
+}
+
+function slugToWords(slug: string): string {
+	return slug.replace(/-/g, ' ').trim();
 }
 
 async function searchUg(
@@ -221,6 +238,122 @@ async function searchUg(
 		});
 	}
 	return { hits, searchUrl: url };
+}
+
+function rankSearchHits(query: string, hits: UgSearchHit[]): UgSearchHit[] {
+	const queryNorm = normalizeSearchText(query);
+	const queryTokens = meaningfulTokens(queryNorm);
+	if (queryTokens.length === 0) return [];
+
+	return hits
+		.map((hit) => ({ hit, score: scoreSearchHit(queryNorm, queryTokens, hit) }))
+		.filter((entry) => entry.score.relevance >= MIN_ACCEPTABLE_MATCH_SCORE)
+		.sort((a, b) => {
+			if (b.score.relevance !== a.score.relevance) return b.score.relevance - a.score.relevance;
+			return b.score.popularity - a.score.popularity;
+		})
+		.map((entry) => entry.hit);
+}
+
+function scoreSearchHit(
+	queryNorm: string,
+	queryTokens: string[],
+	hit: UgSearchHit
+): { relevance: number; popularity: number } {
+	const titleNorm = normalizeSearchText(hit.title);
+	const artistNorm = normalizeSearchText(hit.artist);
+	const combinedNorm = normalizeSearchText(`${hit.title} ${hit.artist}`);
+	const titleTokens = meaningfulTokens(titleNorm);
+	const combinedTokens = meaningfulTokens(combinedNorm);
+
+	const titleScore = phraseScore(queryNorm, titleNorm);
+	const combinedScore = phraseScore(queryNorm, combinedNorm);
+	const titleTokenScore = tokenContainmentScore(queryTokens, titleTokens);
+	const combinedTokenScore = tokenContainmentScore(queryTokens, combinedTokens);
+
+	let relevance = Math.max(
+		titleScore,
+		combinedScore * 0.94,
+		titleTokenScore * 0.95,
+		combinedTokenScore * 0.88
+	);
+
+	if (queryNorm === titleNorm) relevance += 0.2;
+	if (artistNorm && queryNorm.includes(artistNorm)) relevance += 0.08;
+
+	return {
+		relevance: Math.min(relevance, 1.2),
+		popularity: Number.isFinite(hit.rating) ? hit.rating * Math.log10(hit.votes + 1) : 0
+	};
+}
+
+function normalizeSearchText(value: string): string {
+	return value
+		.toLowerCase()
+		.normalize('NFD')
+		.replace(/[\u0300-\u036f]/g, '')
+		.replace(/&/g, ' and ')
+		.replace(/\bfeat(?:uring)?\b|\bft\b/g, ' ')
+		.replace(/[^a-z0-9]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function meaningfulTokens(value: string): string[] {
+	return value.split(' ').filter((token) => token.length > 1);
+}
+
+function phraseScore(queryNorm: string, candidateNorm: string): number {
+	if (!candidateNorm) return 0;
+	if (queryNorm === candidateNorm) return 1;
+	if (candidateNorm.includes(queryNorm)) {
+		return Math.max(0.72, queryNorm.length / candidateNorm.length);
+	}
+	if (queryNorm.includes(candidateNorm)) {
+		return Math.max(0.68, candidateNorm.length / queryNorm.length);
+	}
+	return levenshteinSimilarity(queryNorm, candidateNorm);
+}
+
+function tokenContainmentScore(queryTokens: string[], candidateTokens: string[]): number {
+	if (queryTokens.length === 0 || candidateTokens.length === 0) return 0;
+	let matched = 0;
+	for (const queryToken of queryTokens) {
+		if (
+			candidateTokens.some(
+				(candidateToken) =>
+					candidateToken === queryToken ||
+					candidateToken.includes(queryToken) ||
+					queryToken.includes(candidateToken)
+			)
+		) {
+			matched++;
+		}
+	}
+	return matched / queryTokens.length;
+}
+
+function levenshteinSimilarity(a: string, b: string): number {
+	const maxLen = Math.max(a.length, b.length);
+	if (maxLen === 0) return 1;
+
+	const previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+	const current = new Array<number>(b.length + 1);
+
+	for (let i = 1; i <= a.length; i++) {
+		current[0] = i;
+		for (let j = 1; j <= b.length; j++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			current[j] = Math.min(
+				current[j - 1] + 1,
+				previous[j] + 1,
+				previous[j - 1] + cost
+			);
+		}
+		for (let j = 0; j <= b.length; j++) previous[j] = current[j];
+	}
+
+	return 1 - previous[b.length] / maxLen;
 }
 
 async function fetchTabPage(url: string, refererUrl?: string): Promise<UgFetchResult> {
@@ -301,7 +434,7 @@ interface FetchedMarkdown {
 
 /**
  * UG's søgeside har søgehits i `<div class="js-store" data-content="...">`,
- * også når Jina renderer den med X-Return-Format: html. Vi forsøger derfor:
+ * også når Jina renderer den med X-Return-Format: html. Fallback kun:
  *   1. direkte fetch (typisk 403 fra Cloud Functions IP)
  *   2. Jina HTML-mode (samme js-store-struktur)
  */
@@ -323,7 +456,7 @@ async function fetchHtmlForSearch(url: string): Promise<string> {
 			: {})
 	};
 	let lastErr = '';
-	for (let attempt = 0; attempt < 3; attempt++) {
+	for (let attempt = 0; attempt < 1; attempt++) {
 		if (attempt > 0) await sleep(500 + attempt * 400);
 		try {
 			const res = await fetch(`https://r.jina.ai/${url}`, {
@@ -370,15 +503,13 @@ async function fetchTabContent(
 		// netværksfejl → fald gennem til Jina markdown
 	}
 
-	// Jina's IP-pool roterer, og UG's Cloudflare-policy er per (IP, URL,
-	// time-window) — så samme request kan svare med Cloudflare-challenge på
-	// ét forsøg og med rigtig HTML på næste. Tre korte retries løfter hit-
-	// raten fra ~20% til ~70% på "cold" sider.
+	// Jina's IP-pool kan ramme Cloudflare. Hold retries lave, så UI hurtigt
+	// falder tilbage til paste-flow i stedet for at føles frosset.
 	const jinaHeaders: Record<string, string> = process.env.JINA_API_KEY
 		? { Authorization: `Bearer ${process.env.JINA_API_KEY}` }
 		: {};
 	let lastErr: string = '';
-	for (let attempt = 0; attempt < 4; attempt++) {
+	for (let attempt = 0; attempt < 2; attempt++) {
 		if (attempt > 0) await sleep(600 + attempt * 400);
 		try {
 			const res = await fetch(`https://r.jina.ai/${url}`, {
@@ -529,11 +660,13 @@ export function cleanUgContent(s: string): string {
  *   - "Capo II" / "Capo V" / "Capo 5" subheaders
  *   - chord-equals-chord lines (capo transposition tables): "D = C"
  *   - "** Alternates:" / "* Alternate" sektion-headers
+ *   - UG-forfatterkommentarer efter sangen: "* It has been suggested..."
  *   - "Open (These chords are not in the original key)"
  */
 function stripTrailingUgJunk(text: string): string {
 	const CHORD_TOKEN = '[A-G][#b]?(?:m|maj|min|dim|sus|add)?\\d?';
 	const JUNK_PATTERNS: RegExp[] = [
+		/^\s*\*+\s+(?:it\s+has\s+been\s+suggested|suggested|note|notes?|this\s+song|you\s+can|thanks?|please|rate)\b/i,
 		/^\s*Capo\s+(?:I+|VI*|IX|X|\d+)\s*$/i,
 		new RegExp(`^\\s*${CHORD_TOKEN}\\s*=\\s*${CHORD_TOKEN}\\s*$`),
 		/^\s*\*+\s*Alternates?\b/i,

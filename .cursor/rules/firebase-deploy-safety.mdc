@@ -1,0 +1,26 @@
+---
+description: Firebase deploy safety for shared project
+alwaysApply: true
+---
+
+# Firebase Deploy Safety
+
+This repo uses the shared Firebase project `p5-firebase-eebc1`.
+
+The project contains functions from other apps/projects. Never run a broad
+functions deploy that can delete or overwrite functions outside this repo.
+
+Allowed:
+
+```bash
+firebase deploy --only functions:fetchUgTab
+```
+
+Do not run:
+
+```bash
+firebase deploy --only functions
+```
+
+Only delete or overwrite other deployed functions if the user explicitly names
+the exact functions and confirms deletion in the current conversation.

@@ -19,9 +19,10 @@ import {
 	updateDoc,
 	type Unsubscribe
 } from 'firebase/firestore';
-import { getDb, COL } from './client';
+import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { getDb, getStorageBucket, COL } from './client';
 import { BAND } from '$lib/data/band';
-import type { CategoryColorMap, SongDoc } from '$lib/types';
+import type { CategoryColorMap, CategoryMetaMap, SongDoc } from '$lib/types';
 import { decodeHtmlEntities } from '$lib/chordFormatter';
 import { migrateSong } from '$lib/migrate';
 import type { Row } from '$lib/songParse';
@@ -122,4 +123,57 @@ export function subscribeCategoryColors(
 
 export async function saveCategoryColors(colors: CategoryColorMap): Promise<void> {
 	await setDoc(settingsRef('categoryColors'), { colors }, { merge: true });
+}
+
+export function subscribeCategoryMeta(
+	cb: (meta: CategoryMetaMap) => void,
+	onError?: (err: Error) => void
+): Unsubscribe {
+	return onSnapshot(
+		settingsRef('categoryMeta'),
+		(snap) => cb((snap.data()?.meta ?? {}) as CategoryMetaMap),
+		(err) => onError?.(err)
+	);
+}
+
+export async function saveCategoryMeta(meta: CategoryMetaMap): Promise<void> {
+	await setDoc(settingsRef('categoryMeta'), { meta }, { merge: true });
+}
+
+export async function uploadCategoryImage(
+	category: string,
+	file: File,
+	uid: string
+): Promise<{ imageUrl: string; imagePath: string }> {
+	const ext = extensionForFile(file);
+	const imagePath = `${COL.bands}/${BAND.id}/categoryImages/${uid}/${slugForStorage(category)}-${Date.now()}.${ext}`;
+	const storageRef = ref(getStorageBucket(), imagePath);
+	await uploadBytes(storageRef, file, {
+		contentType: file.type || `image/${ext}`,
+		customMetadata: { category }
+	});
+	const imageUrl = await getDownloadURL(storageRef);
+	return { imageUrl, imagePath };
+}
+
+export async function deleteCategoryImage(imagePath: string | undefined): Promise<void> {
+	if (!imagePath) return;
+	await deleteObject(ref(getStorageBucket(), imagePath));
+}
+
+function extensionForFile(file: File): string {
+	const fromName = file.name.split('.').pop()?.toLowerCase();
+	if (fromName && /^[a-z0-9]{2,5}$/.test(fromName)) return fromName;
+	if (file.type === 'image/png') return 'png';
+	if (file.type === 'image/webp') return 'webp';
+	return 'jpg';
+}
+
+function slugForStorage(value: string): string {
+	return value
+		.normalize('NFKD')
+		.replace(/[\u0300-\u036f]/g, '')
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '') || 'category';
 }

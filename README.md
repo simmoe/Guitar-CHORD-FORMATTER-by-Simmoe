@@ -43,6 +43,20 @@ diff scripts/.live-firestore.rules.txt firestore.rules
 firebase deploy --only firestore:rules --project p5-firebase-eebc1
 ```
 
+## Firebase Functions — VIGTIGT
+
+Firebase-projektet `p5-firebase-eebc1` deles med andre apps og har functions,
+som ikke tilhører dette repo. Deploy aldrig alle functions samlet, da Firebase
+CLI kan forsøge at slette functions, der ikke findes lokalt.
+
+```bash
+# OK: deploy kun denne apps UG-import
+firebase deploy --only functions:fetchUgTab
+
+# IKKE OK: kan forsøge at slette andre projekters functions
+firebase deploy --only functions
+```
+
 ## Bootstrap af bandet
 
 Engangs-script der opretter `chord_bands/faellesbandet`-dokumentet med UID'er slået op fra Firebase Auth:

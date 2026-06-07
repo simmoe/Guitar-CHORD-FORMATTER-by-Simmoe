@@ -2,13 +2,14 @@ import {
 	onAuthStateChanged,
 	signInWithEmailAndPassword,
 	signInWithPopup,
+	updateProfile,
 	GoogleAuthProvider,
 	signOut as fbSignOut,
 	type User
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { getFirebaseAuth, getDb, COL } from './firebase/client';
-import { isBandMemberEmail, getBandMember } from './data/band';
+import { BAND } from './data/band';
 import type { UserDoc } from './types';
 
 class AuthState {
@@ -27,7 +28,7 @@ class AuthState {
 			this.user = u;
 			this.notAuthorized = false;
 			if (u) {
-				if (!isBandMemberEmail(u.email)) {
+				if (!(await this.#isBandMember(u.uid))) {
 					// Logget ind med en ikke-godkendt konto — vis fejlbesked,
 					// log ud, og bed brugeren bruge en bandkonto.
 					this.notAuthorized = true;
@@ -43,20 +44,45 @@ class AuthState {
 		});
 	}
 
+	async #isBandMember(uid: string): Promise<boolean> {
+		const db = getDb();
+		try {
+			const snap = await getDoc(doc(db, COL.bands, BAND.id));
+			return ((snap.data()?.memberUids ?? []) as string[]).includes(uid);
+		} catch (err) {
+			console.warn('Kunne ikke validere band-medlemskab:', err);
+			return false;
+		}
+	}
+
 	async #ensureProfile(u: User) {
 		const db = getDb();
 		const ref = doc(db, COL.users, u.uid);
 		const snap = await getDoc(ref);
-		const member = getBandMember(u.email);
 		if (!snap.exists()) {
 			await setDoc(ref, {
-				displayName: member?.displayName ?? u.displayName ?? u.email?.split('@')[0] ?? 'Bruger',
+				displayName: u.displayName ?? u.email?.split('@')[0] ?? 'Bruger',
 				email: u.email ?? '',
 				createdAt: serverTimestamp()
 			});
 		}
 		const fresh = await getDoc(ref);
 		this.profile = fresh.data() as UserDoc;
+	}
+
+	async refreshCurrentProfile() {
+		const auth = getFirebaseAuth();
+		if (!auth.currentUser) return;
+		await auth.currentUser.reload();
+		this.user = auth.currentUser;
+		await this.#ensureProfile(auth.currentUser);
+	}
+
+	async setCurrentDisplayName(displayName: string) {
+		const auth = getFirebaseAuth();
+		if (!auth.currentUser) return;
+		await updateProfile(auth.currentUser, { displayName });
+		await this.refreshCurrentProfile();
 	}
 
 	async loginEmail(email: string, password: string) {

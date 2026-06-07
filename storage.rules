@@ -1,0 +1,40 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Eksisterende apps i samme projekt — ikke fjern uden afstemning.
+    match /mat_teacher/{uid}/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.size < 15 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Fagbegrebs-wiki (informatik-c). Sti: informatik_c/{entrySlug}/{uid}/...
+    match /informatik_c/{entrySlug}/{uid}/{allPaths=**} {
+      allow read: if true;
+      allow create: if request.auth != null
+                    && request.auth.uid == uid
+                    && request.resource.size < 25 * 1024 * 1024
+                    && (
+                      request.resource.contentType.matches('image/.*')
+                      || request.resource.contentType.matches('video/.*')
+                      || request.resource.contentType.matches('audio/.*')
+                    );
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Fællesbandet kategori-forsidebilleder.
+    // Read er public så billeder kan bruges i PDF/forsider. Write/delete er
+    // bundet til uploaderens UID uden Firestore cross-service lookup.
+    match /chord_bands/{bandId}/categoryImages/{uid}/{imageId} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource != null
+        && request.resource.size < 15 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

@@ -34,6 +34,16 @@ export interface CategoryColor {
 
 export type CategoryColorMap = Record<string, CategoryColor>;
 
+export interface CategoryMeta {
+	introText?: string;
+	imageUrl?: string;
+	imagePath?: string;
+	createdAt?: number;
+	updatedAt?: number;
+}
+
+export type CategoryMetaMap = Record<string, CategoryMeta>;
+
 /**
  * Sektioner (Verse, Chorus, …) brugeren har klappet sammen. Identificeret
  * via headerens 0-baserede index i sangens header-liste.
