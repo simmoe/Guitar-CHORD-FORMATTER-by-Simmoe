@@ -47,6 +47,7 @@
 	let bassLines = $state<BassLines>({});
 	let collapsedSections = $state<CollapsedSections>([]);
 	let categoryColorMap = $state<CategoryColorMap>({});
+	let showBassTabs = $state(true);
 	let fitSinglePage = $state(true);
 
 	let allSongs = $state<SongDoc[]>([]);
@@ -93,6 +94,7 @@
 				rows = [...(s.rows ?? parseRows(s.rawInput ?? ''))];
 				bassLines = { ...(s.bassLines ?? {}) };
 				collapsedSections = [...(s.collapsedSections ?? [])];
+				showBassTabs = s.showBassTabs ?? true;
 				fitSinglePage = s.fitSinglePage ?? true;
 			})
 			.catch((err) => (loadError = err instanceof Error ? err.message : 'Ukendt fejl'))
@@ -137,6 +139,7 @@
 				rawInput: serializeRows(rows),
 				bassLines,
 				collapsedSections,
+				showBassTabs,
 				fitSinglePage,
 				schemaVersion: 4
 			};
@@ -253,8 +256,6 @@
 		goto('/songbook');
 	}
 
-	let withBassTabs = $state(true);
-
 	const liveSongForExport = $derived<SongDoc | null>(
 		song
 			? ({
@@ -268,6 +269,7 @@
 					rawInput: serializeRows(rows),
 					bassLines,
 					collapsedSections,
+					showBassTabs,
 					fitSinglePage
 				} as SongDoc)
 			: null
@@ -284,7 +286,7 @@
 			if (!liveSongForExport) return;
 			await exportSongsAsPdf([liveSongForExport], {
 				filename: title.trim() || song.title || 'Sang',
-				withBassTabs,
+				withBassTabs: showBassTabs,
 				fitSinglePage
 			});
 		} catch (err) {
@@ -400,8 +402,8 @@
 					/>
 				</div>
 				<div class="flex items-center gap-1.5">
-					<label class="print-toggle" title="Tag bass-tabs med ved print">
-						<input type="checkbox" bind:checked={withBassTabs} />
+					<label class="print-toggle" title="Vis bass-tabs på siden og tag dem med ved print">
+						<input type="checkbox" bind:checked={showBassTabs} onchange={() => scheduleSave()} />
 						Bass tabs
 					</label>
 					<label
@@ -501,7 +503,7 @@
 				</div>
 			</details>
 
-			<div class="song-area">
+			<div class="song-area" class:no-bass-tabs={!showBassTabs}>
 				<EditableSong
 					{rows}
 					{barsPerLine}

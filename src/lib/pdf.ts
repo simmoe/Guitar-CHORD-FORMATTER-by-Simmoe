@@ -22,6 +22,10 @@ import PrintableSong from './components/PrintableSong.svelte';
 import { categoryImageDataUrl } from './firebase/images';
 import type { CategoryMeta, SongDoc } from './types';
 
+export type SongbookPrintEntry =
+	| { type: 'song'; song: SongDoc; withBassTabs?: boolean }
+	| { type: 'set'; id: string; label: string };
+
 interface ExportOptions {
 	filename: string;
 	withBassTabs?: boolean;
@@ -311,10 +315,11 @@ async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<vo
  * sidens browser-print (flere sange).
  */
 export async function exportSongsAsPdf(
-	songs: SongDoc[],
+	songs: SongDoc[] | SongbookPrintEntry[],
 	opts: ExportOptions
 ): Promise<void> {
 	if (songs.length === 0) return;
+	const entries = normalizePrintEntries(songs);
 
 	const wrapper = document.createElement('div');
 	wrapper.style.position = 'fixed';
@@ -341,7 +346,7 @@ export async function exportSongsAsPdf(
 			target: coverDiv,
 			props: {
 				title: opts.coverTitle ?? opts.filename,
-				songCount: songs.length,
+				songCount: entries.filter((entry) => entry.type === 'song').length,
 				categoryMeta: coverMeta
 			}
 		});
@@ -349,15 +354,24 @@ export async function exportSongsAsPdf(
 		pageEls.push(coverDiv);
 	}
 
-	for (const song of songs) {
+	for (const entry of entries) {
 		const pageDiv = document.createElement('div');
 		pageDiv.style.background = '#ffffff';
-		pageDiv.style.padding = OFFSCREEN_PAGE_PADDING;
-		pageDiv.dataset.fitSinglePage = String(opts.fitSinglePage ?? song.fitSinglePage ?? true);
 		pageDiv.classList.add('pdf-snapshot-page');
 		wrapper.appendChild(pageDiv);
-		const c = mount(PrintableSong, { target: pageDiv, props: { song } });
-		components.push(c);
+		if (entry.type === 'set') {
+			pageDiv.dataset.fitSinglePage = 'false';
+			pageDiv.innerHTML = setBreakPageHtml(entry.label);
+		} else {
+			const song = entry.song;
+			pageDiv.style.padding = OFFSCREEN_PAGE_PADDING;
+			pageDiv.dataset.fitSinglePage = String(opts.fitSinglePage ?? song.fitSinglePage ?? true);
+			if ((entry.withBassTabs ?? song.showBassTabs ?? true) === false) {
+				pageDiv.classList.add('no-bass-tabs');
+			}
+			const c = mount(PrintableSong, { target: pageDiv, props: { song } });
+			components.push(c);
+		}
 		pageEls.push(pageDiv);
 	}
 
@@ -373,6 +387,28 @@ export async function exportSongsAsPdf(
 		for (const c of components) unmount(c);
 		document.body.removeChild(wrapper);
 	}
+}
+
+function normalizePrintEntries(input: SongDoc[] | SongbookPrintEntry[]): SongbookPrintEntry[] {
+	return input.map((entry) =>
+		'type' in entry && (entry.type === 'song' || entry.type === 'set')
+			? entry
+			: { type: 'song', song: entry as SongDoc }
+	);
+}
+
+function setBreakPageHtml(label: string): string {
+	const safeLabel = escapeHtml(label.trim() || 'Sæt');
+	return `<article class="set-break-page">
+		<div>
+			<p>Sæt</p>
+			<h1>${safeLabel}</h1>
+		</div>
+	</article>`;
+}
+
+function escapeHtml(str: string): string {
+	return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 export async function exportAudienceSongbookAsPdf(

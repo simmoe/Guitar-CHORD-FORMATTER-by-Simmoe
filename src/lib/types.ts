@@ -38,6 +38,12 @@ export interface CategoryMeta {
 	introText?: string;
 	imageUrl?: string;
 	imagePath?: string;
+	/**
+	 * Udskrivningsrækkefølge for kategorien.
+	 * Almindelige værdier er songId'er. Sæt-markører gemmes som interne
+	 * tokens (`__set__:<id>`) så eksisterende live-data med songId[] bevares.
+	 */
+	songOrder?: string[];
 	createdAt?: number;
 	updatedAt?: number;
 }
@@ -70,6 +76,8 @@ export interface SongDoc {
 	barsPerLine: 2 | 4 | 8;
 	bassLines?: BassLines;
 	collapsedSections?: CollapsedSections;
+	/** Om bass tabs skal vises på sangside og medtages i PDF'er. */
+	showBassTabs?: boolean;
 	/** Om PDF-export som udgangspunkt skal skalere sangen til maks én A4-side. */
 	fitSinglePage?: boolean;
 	categories?: string[];

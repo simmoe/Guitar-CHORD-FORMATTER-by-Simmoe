@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { sectionHeaderType } from '$lib/chordFormatter';
 	import { buildSections, parseRows, type Row } from '$lib/songParse';
 	import type { CategoryMeta, SongDoc } from '$lib/types';
 
@@ -10,7 +11,10 @@
 
 	const { title, songs, categoryMeta }: Props = $props();
 
-	type AudienceLine = { kind: 'lyric'; text: string } | { kind: 'blank' };
+	type AudienceLine =
+		| { kind: 'lyric'; text: string }
+		| { kind: 'label'; text: string }
+		| { kind: 'blank' };
 
 	interface AudienceSong {
 		id: string;
@@ -43,12 +47,24 @@
 		const rows = rowsFor(song);
 		const sections = buildSections(rows);
 		const lines: AudienceLine[] = [];
+		let hasRenderedChorus = false;
 
 		if (sections.length === 0) {
 			for (const row of rows) appendAudienceRow(lines, row);
 		} else {
 			for (const section of sections) {
-				appendBlank(lines);
+				if (sectionHeaderType(section.headerText) === 'chorus') {
+					if (hasRenderedChorus) {
+						appendBlank(lines);
+						appendLabel(lines, cleanChorusLabel(section.headerText));
+						continue;
+					}
+					appendBlank(lines);
+					appendLabel(lines, cleanChorusLabel(section.headerText));
+					hasRenderedChorus = true;
+				} else {
+					appendBlank(lines);
+				}
 				for (let i = section.bodyStart; i < section.bodyEnd; i++) {
 					appendAudienceRow(lines, rows[i]);
 				}
@@ -84,6 +100,17 @@
 		if (lines.at(-1)?.kind !== 'blank') lines.push({ kind: 'blank' });
 	}
 
+	function appendLabel(lines: AudienceLine[], text: string): void {
+		const lastNonBlank = [...lines].reverse().find((line) => line.kind !== 'blank');
+		if (lastNonBlank?.kind === 'label' && lastNonBlank.text === text) return;
+		lines.push({ kind: 'label', text });
+	}
+
+	function cleanChorusLabel(headerText: string): string {
+		const trimmed = headerText.trim();
+		return trimmed || 'Omkvæd';
+	}
+
 	function trimAudienceLines(lines: AudienceLine[]): AudienceLine[] {
 		let start = 0;
 		let end = lines.length;
@@ -94,18 +121,19 @@
 
 	function songUnits(song: AudienceSong): number {
 		const lyricCount = song.lines.filter((line) => line.kind === 'lyric').length;
-		const blankCount = song.lines.length - lyricCount;
-		return lyricCount + blankCount * 1.35;
+		const labelCount = song.lines.filter((line) => line.kind === 'label').length;
+		const blankCount = song.lines.length - lyricCount - labelCount;
+		return lyricCount + labelCount * 0.8 + blankCount * 1.35;
 	}
 
 	function columnsForSong(song: AudienceSong): { columnClass: string; scale: number } {
 		const units = songUnits(song);
-		if (units <= 38) return { columnClass: 'audience-lines--one', scale: 1 };
-		if (units <= 92) return { columnClass: 'audience-lines--two', scale: 1 };
-		if (units <= 138) return { columnClass: 'audience-lines--three', scale: 1 };
+		if (units <= 31) return { columnClass: 'audience-lines--one', scale: 1 };
+		if (units <= 76) return { columnClass: 'audience-lines--two', scale: 1 };
+		if (units <= 114) return { columnClass: 'audience-lines--three', scale: 1 };
 		return {
 			columnClass: 'audience-lines--three',
-			scale: Math.max(0.82, Math.min(1, 138 / units))
+			scale: Math.max(0.76, Math.min(1, 114 / units))
 		};
 	}
 
@@ -173,6 +201,8 @@
 					{#each song.lines as line}
 						{#if line.kind === 'lyric'}
 							<p>{line.text}</p>
+						{:else if line.kind === 'label'}
+							<p class="audience-repeat-label">{line.text}</p>
 						{:else}
 							<div class="audience-blank"></div>
 						{/if}
@@ -329,14 +359,23 @@
 		column-gap: 8mm;
 	}
 	.audience-lines p {
-		margin: 0 0 1.55mm;
-		font-size: 10.7pt;
-		line-height: 1.42;
+		margin: 0 0 1.2mm;
+		font-size: 15.4pt;
+		line-height: 1.24;
 		color: #1f2937;
 		white-space: pre-wrap;
 	}
+	.audience-lines .audience-repeat-label {
+		margin: 2.4mm 0 1.7mm;
+		color: #9a6a12;
+		font-family: var(--font-display);
+		font-size: 13.2pt;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
 	.audience-blank {
-		height: 4.2mm;
+		height: 3.2mm;
 	}
 	.audience-page-number {
 		position: absolute;

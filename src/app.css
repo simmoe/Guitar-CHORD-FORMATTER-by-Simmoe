@@ -262,15 +262,23 @@ select {
 
 /* ──────────────────────────────────────────────────────────────────────────
  * "Uden bass tabs" — global hjælper. Sættes på en wrapper rundt om en
- * EditableSong (eller flere) for at skjule højre rytme-kolonne både i
- * skærm-preview og under print. Bruges på både print-siden og enkelt-sang-
- * siden, så toggle'en kan placeres begge steder uden style-duplication.
+ * EditableSong/PrintableSong (eller flere) for at skjule højre bas-kolonne
+ * både på skærm og i PDF/print uden at slette bassLines fra databasen.
  * ──────────────────────────────────────────────────────────────────────── */
 .no-bass-tabs .rhythm-cell {
-	display: none !important;
+	visibility: hidden !important;
+	pointer-events: none !important;
+}
+.no-bass-tabs .pdf-bass {
+	visibility: hidden !important;
 }
 .no-bass-tabs .editable-song.chord-grid {
-	grid-template-columns: 2.6em minmax(0, 1fr) !important;
+	grid-template-columns: minmax(0, 1fr) 6em !important;
+	column-gap: 1em !important;
+}
+.no-bass-tabs .pdf-section-grid {
+	grid-template-columns: minmax(0, 1fr) 18mm !important;
+	column-gap: calc(3mm * var(--pdf-layout-scale, 1)) !important;
 }
 
 /* PDF-snapshot: udnyt A4-arealet. Den normale card-padding er rar på
@@ -290,6 +298,13 @@ select {
 	grid-auto-flow: row !important;
 	direction: ltr !important;
 	width: auto !important;
+}
+.no-bass-tabs.pdf-snapshot-page.print-page .chord-grid,
+.no-bass-tabs.pdf-snapshot-page .print-page .chord-grid,
+.pdf-snapshot-page .no-bass-tabs.print-page .chord-grid,
+.pdf-snapshot-page .print-page.no-bass-tabs .chord-grid {
+	grid-template-columns: minmax(0, 172mm) 18mm !important;
+	column-gap: 3mm !important;
 }
 .pdf-snapshot-page.print-page .lyrics-cell,
 .pdf-snapshot-page .print-page .lyrics-cell {
@@ -359,6 +374,33 @@ select {
 	font-weight: 800;
 	letter-spacing: 0.05em;
 	text-transform: uppercase;
+}
+.set-break-page {
+	box-sizing: border-box;
+	width: 210mm;
+	min-height: 297mm;
+	display: grid;
+	place-items: center;
+	background: #ffffff;
+	color: #151a22;
+	font-family: var(--font-sans);
+}
+.set-break-page p {
+	margin: 0 0 5mm;
+	color: #9a6a12;
+	font-size: 9pt;
+	font-weight: 800;
+	letter-spacing: 0.16em;
+	text-align: center;
+	text-transform: uppercase;
+}
+.set-break-page h1 {
+	margin: 0;
+	font-family: var(--font-display);
+	font-size: 36pt;
+	font-weight: 800;
+	letter-spacing: -0.04em;
+	text-align: center;
 }
 .pdf-section-grid {
 	display: grid;
