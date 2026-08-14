@@ -508,6 +508,7 @@
 					{rows}
 					{barsPerLine}
 					{bassLines}
+					{showBassTabs}
 					{collapsedSections}
 					{onRowsChange}
 					{onBassLinesChange}

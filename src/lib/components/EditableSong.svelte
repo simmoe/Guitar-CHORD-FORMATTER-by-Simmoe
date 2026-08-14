@@ -32,6 +32,8 @@
 		bassLines?: BassLines;
 		collapsedSections?: CollapsedSections;
 		readOnly?: boolean;
+		/** Når false skjules højre bas-kolonne på skærm og print. Data slettes ikke. */
+		showBassTabs?: boolean;
 		onRowsChange?: (next: Row[]) => void;
 		onBassLinesChange?: (next: BassLines) => void;
 		onCollapsedSectionsChange?: (next: CollapsedSections) => void;
@@ -42,6 +44,7 @@
 		bassLines = {},
 		collapsedSections = [],
 		readOnly = false,
+		showBassTabs = true,
 		onRowsChange,
 		onBassLinesChange,
 		onCollapsedSectionsChange
@@ -789,7 +792,7 @@
 		hoveredRow = rowIdx;
 		const rowEl = e.currentTarget as HTMLElement;
 		const rowRect = rowEl.getBoundingClientRect();
-		const hasBass = canHaveBass(rowIdx) && !!bassLines[String(rowIdx)]?.trim();
+		const hasBass = showBassTabs && canHaveBass(rowIdx) && !!bassLines[String(rowIdx)]?.trim();
 		const toolbarWidth = hasBass ? 180 : 128;
 		const cursorGap = 12;
 		const viewportPadding = 8;
@@ -859,6 +862,7 @@
 <div
 	class="editable-song chord-grid"
 	class:read-only={readOnly}
+	class:hide-bass={!showBassTabs}
 	role={readOnly ? 'presentation' : 'textbox'}
 	aria-multiline={readOnly ? undefined : 'true'}
 	tabindex={readOnly ? undefined : -1}
@@ -916,7 +920,7 @@
 									<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
 								</svg>
 							</button>
-							{#if previousSameTypeHasChords(headerIdx)}
+							{#if showBassTabs && previousSameTypeHasChords(headerIdx)}
 								<button
 									type="button"
 									class="section-action-btn section-action-btn--bass"
@@ -966,16 +970,18 @@
 					</div>
 				{/if}
 			</div>
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div
-				class="section-header-echo"
-				aria-hidden="true"
-				onmouseenter={readOnly ? undefined : hideRowToolbar}
-			>
-				<span class="section-header section-header--{sectionHeaderType(row.text)}">
-					{cleanSectionHeader(row.text)}
-				</span>
-			</div>
+			{#if showBassTabs}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					class="section-header-echo"
+					aria-hidden="true"
+					onmouseenter={readOnly ? undefined : hideRowToolbar}
+				>
+					<span class="section-header section-header--{sectionHeaderType(row.text)}">
+						{cleanSectionHeader(row.text)}
+					</span>
+				</div>
+			{/if}
 		{:else if isRowHidden(i)}
 			<!-- skjult af kollapset sektion -->
 		{:else if row.kind === 'blank' || row.kind === 'lyric'}
@@ -999,7 +1005,7 @@
 				tabindex={readOnly ? undefined : 0}
 				aria-label={readOnly ? undefined : row.kind === 'blank' ? 'Tom linje' : 'Tekst-linje'}
 			></div>
-			{@render bassCell(i)}
+			{#if showBassTabs}{@render bassCell(i)}{/if}
 		{:else if row.kind === 'chord'}
 			{@render rowGutter(i)}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1024,7 +1030,7 @@
 				tabindex={readOnly ? undefined : 0}
 				aria-label={readOnly ? undefined : `Rediger akkord-linje for række ${i + 1}`}
 			>{#if row.text.trim()}{@html renderBarLine(row.text)}{:else}&nbsp;{/if}</div>
-			{@render bassCell(i)}
+			{#if showBassTabs}{@render bassCell(i)}{/if}
 		{/if}
 	{/each}
 </div>
@@ -1032,7 +1038,7 @@
 {#if hoverToolbar && !readOnly}
 	{@const toolbarRowIdx = hoverToolbar.rowIdx}
 	{@const currentKind = rowKindToOption(rows[toolbarRowIdx])}
-	{@const hasToolbarBass = canHaveBass(toolbarRowIdx) && !!bassLines[String(toolbarRowIdx)]?.trim()}
+	{@const hasToolbarBass = showBassTabs && canHaveBass(toolbarRowIdx) && !!bassLines[String(toolbarRowIdx)]?.trim()}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="floating-row-toolbar"
@@ -1201,6 +1207,10 @@
 	.editable-song.chord-grid {
 		grid-template-columns: minmax(0, 1fr) minmax(8em, max-content);
 		column-gap: 2em;
+	}
+	.editable-song.chord-grid.hide-bass {
+		grid-template-columns: minmax(0, 1fr);
+		column-gap: 0;
 	}
 	.editable-song.chord-grid > .rhythm-cell {
 		justify-self: stretch;

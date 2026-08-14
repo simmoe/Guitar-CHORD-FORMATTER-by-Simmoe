@@ -112,7 +112,7 @@
 		</div>
 
 		{#each filtered as song (song.id)}
-			<PrintableSong {song} />
+			<PrintableSong {song} showBassTabs={withBassTabs} />
 		{/each}
 	</div>
 {/if}
