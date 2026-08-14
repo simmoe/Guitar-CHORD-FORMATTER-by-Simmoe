@@ -369,7 +369,13 @@ export async function exportSongsAsPdf(
 			if ((entry.withBassTabs ?? song.showBassTabs ?? true) === false) {
 				pageDiv.classList.add('no-bass-tabs');
 			}
-			const c = mount(PrintableSong, { target: pageDiv, props: { song } });
+			const c = mount(PrintableSong, {
+				target: pageDiv,
+				props: {
+					song,
+					showBassTabs: entry.withBassTabs ?? song.showBassTabs ?? true
+				}
+			});
 			components.push(c);
 		}
 		pageEls.push(pageDiv);

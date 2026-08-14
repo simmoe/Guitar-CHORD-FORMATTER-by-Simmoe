@@ -262,23 +262,26 @@ select {
 
 /* ──────────────────────────────────────────────────────────────────────────
  * "Uden bass tabs" — global hjælper. Sættes på en wrapper rundt om en
- * EditableSong/PrintableSong (eller flere) for at skjule højre bas-kolonne
- * både på skærm og i PDF/print uden at slette bassLines fra databasen.
+ * EditableSong/PrintableSong (eller flere) for at fjerne højre bas-kolonne
+ * både på skærm, browser-print og PDF uden at slette bassLines fra databasen.
+ *
+ * Brug `display: none` (ikke `visibility: hidden`): ellers bliver kolonnen
+ * stående som tom plads, og sektions-echo i højre kolonne forsvinder ikke.
  * ──────────────────────────────────────────────────────────────────────── */
-.no-bass-tabs .rhythm-cell {
-	visibility: hidden !important;
-	pointer-events: none !important;
+.no-bass-tabs .rhythm-cell,
+.no-bass-tabs .section-header-echo {
+	display: none !important;
 }
 .no-bass-tabs .pdf-bass {
-	visibility: hidden !important;
+	display: none !important;
 }
 .no-bass-tabs .editable-song.chord-grid {
-	grid-template-columns: minmax(0, 1fr) 6em !important;
-	column-gap: 1em !important;
+	grid-template-columns: minmax(0, 1fr) !important;
+	column-gap: 0 !important;
 }
 .no-bass-tabs .pdf-section-grid {
-	grid-template-columns: minmax(0, 1fr) 18mm !important;
-	column-gap: calc(3mm * var(--pdf-layout-scale, 1)) !important;
+	grid-template-columns: minmax(0, 1fr) !important;
+	column-gap: 0 !important;
 }
 
 /* PDF-snapshot: udnyt A4-arealet. Den normale card-padding er rar på
@@ -303,8 +306,8 @@ select {
 .no-bass-tabs.pdf-snapshot-page .print-page .chord-grid,
 .pdf-snapshot-page .no-bass-tabs.print-page .chord-grid,
 .pdf-snapshot-page .print-page.no-bass-tabs .chord-grid {
-	grid-template-columns: minmax(0, 172mm) 18mm !important;
-	column-gap: 3mm !important;
+	grid-template-columns: minmax(0, 190mm) !important;
+	column-gap: 0 !important;
 }
 .pdf-snapshot-page.print-page .lyrics-cell,
 .pdf-snapshot-page .print-page .lyrics-cell {
@@ -407,6 +410,10 @@ select {
 	grid-template-columns: minmax(0, 1fr) max-content;
 	column-gap: calc(10mm * var(--pdf-layout-scale));
 	align-items: baseline;
+}
+.pdf-section-grid.hide-bass {
+	grid-template-columns: minmax(0, 1fr);
+	column-gap: 0;
 }
 .pdf-line,
 .pdf-bass {

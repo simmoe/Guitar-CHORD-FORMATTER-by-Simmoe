@@ -13,8 +13,11 @@
 
 	interface Props {
 		song: SongDoc;
+		/** Override sangens `showBassTabs`. Udeladt = brug sangens egen indstilling. */
+		showBassTabs?: boolean;
 	}
-	const { song }: Props = $props();
+	const { song, showBassTabs }: Props = $props();
+	const includeBass = $derived(showBassTabs ?? song.showBassTabs ?? true);
 
 	const semitones = $derived(song.transpose ?? 0);
 	const baseRows = $derived(song.rows ?? parseRows(song.rawInput ?? ''));
@@ -102,17 +105,23 @@
 					<div class="pdf-section-label">{section.label}</div>
 				{/if}
 				{#if !section.compact}
-					<div class="pdf-section-grid">
+					<div class="pdf-section-grid" class:hide-bass={!includeBass}>
 						{#each section.rows as item}
 							{#if item.row.kind === 'blank'}
 								<div class="pdf-line pdf-line--blank"></div>
-								<div class="pdf-bass pdf-line--blank">{@html bassHtmlFor(item.rowIdx)}</div>
+								{#if includeBass}
+									<div class="pdf-bass pdf-line--blank">{@html bassHtmlFor(item.rowIdx)}</div>
+								{/if}
 							{:else if item.row.kind === 'chord'}
 								<div class="pdf-line pdf-chord">{@html renderPrintableBarLine(item.row.text)}</div>
-								<div class="pdf-bass">{@html bassHtmlFor(item.rowIdx)}</div>
+								{#if includeBass}
+									<div class="pdf-bass">{@html bassHtmlFor(item.rowIdx)}</div>
+								{/if}
 							{:else if item.row.kind === 'lyric'}
 								<div class="pdf-line pdf-lyric">{item.row.text}</div>
-								<div class="pdf-bass">{@html bassHtmlFor(item.rowIdx)}</div>
+								{#if includeBass}
+									<div class="pdf-bass">{@html bassHtmlFor(item.rowIdx)}</div>
+								{/if}
 							{/if}
 						{/each}
 					</div>
