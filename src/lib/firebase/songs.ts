@@ -23,7 +23,7 @@ import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage
 import { getDb, getStorageBucket, COL } from './client';
 import { BAND } from '$lib/data/band';
 import type { CategoryColorMap, CategoryMetaMap, SongDoc } from '$lib/types';
-import { decodeHtmlEntities } from '$lib/chordFormatter';
+import { decodeHtmlEntities, stripNoChordMarkers } from '$lib/chordFormatter';
 import { migrateSong } from '$lib/migrate';
 import type { Row } from '$lib/songParse';
 
@@ -57,7 +57,13 @@ function sanitizeSong(s: SongDoc): SongDoc {
 }
 
 function decodeRows(rows: Row[]): Row[] {
-	return rows.map((r) => (r.kind === 'blank' ? r : { ...r, text: decodeHtmlEntities(r.text) }));
+	return rows.map((r) => {
+		if (r.kind === 'blank') return r;
+		const text = decodeHtmlEntities(r.text);
+		if (r.kind !== 'chord') return { ...r, text };
+		const stripped = stripNoChordMarkers(text);
+		return stripped.trim() === '' ? { kind: 'blank' } : { ...r, text: stripped };
+	});
 }
 
 export function subscribeSongs(

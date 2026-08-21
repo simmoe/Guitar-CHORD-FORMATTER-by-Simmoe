@@ -29,11 +29,31 @@ export function isChordLine(line: string): boolean {
 	return chordOnlyLineRegex.test(stripped);
 }
 
+// "No chord"-markører (N.C., NC, N.C, n.c., N/C) betyder et break/pause i en
+// akkordlinje. Vi ønsker ikke at vise dem — vi sletter markøren og lader de
+// øvrige akkorder på linjen stå. Token'et matches whitespace-/pipe-afgrænset,
+// så vi aldrig rammer en rigtig akkord (der altid starter på A-G).
+const NO_CHORD_MARKER = /(^|[\s|])(?:n\.?c\.?|n\/c)(?=[\s|]|$)/gi;
+
+/**
+ * Fjern "no chord"-markører fra en akkord-linje. De resterende akkorder
+ * bevares. Linjer uden markør returneres uændret (så bl.a. importens
+ * brede-gap-håndtering ikke forstyrres).
+ */
+export function stripNoChordMarkers(line: string): string {
+	if (!line) return line;
+	const replaced = line.replace(NO_CHORD_MARKER, '$1');
+	if (replaced === line) return line;
+	return replaced.replace(/[^\S\r\n]{2,}/g, ' ').trim();
+}
+
 function normalizeChordLineMarkers(line: string): string {
-	return line
-		.replace(/\*/g, '')
-		.replace(/(^|\s)\+(?=\s|$)/g, ' ')
-		.replace(/([A-G][#b]?(?:[majsudigotb0-9#\+\-\(\)\^∆°ø]*)(?:\/[A-G][#b]?)?)\+(?=\s|$)/g, '$1');
+	return stripNoChordMarkers(
+		line
+			.replace(/\*/g, '')
+			.replace(/(^|\s)\+(?=\s|$)/g, ' ')
+			.replace(/([A-G][#b]?(?:[majsudigotb0-9#\+\-\(\)\^∆°ø]*)(?:\/[A-G][#b]?)?)\+(?=\s|$)/g, '$1')
+	);
 }
 
 // ============================================================================
