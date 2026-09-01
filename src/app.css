@@ -281,6 +281,19 @@ select {
 	column-gap: calc(2mm * var(--pdf-layout-scale, 1)) !important;
 }
 
+/* Mobilportræt: skjul bass-kolonnen på skærmen — teksten får fuld bredde.
+ * Print og PDF følger stadig showBassTabs / withBassTabs som normalt. */
+@media screen and (max-width: 768px) and (orientation: portrait) {
+	.chord-grid .rhythm-cell,
+	.chord-grid .section-header-echo {
+		display: none !important;
+	}
+	.editable-song.chord-grid {
+		grid-template-columns: minmax(0, 1fr) !important;
+		column-gap: 0 !important;
+	}
+}
+
 /* PDF-snapshot: udnyt A4-arealet. Den normale card-padding er rar på
  * skærm, men i raster-PDF'en tæller hver millimeter. */
 .pdf-snapshot-page.print-page,
