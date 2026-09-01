@@ -7,7 +7,7 @@
  * migration-helper. `rawInput` bevares som læsbar fallback i
  * dokumentet og holdes i sync ved save via `serializeRows`.
  */
-import { cleanSectionHeader, isChordLine, isSectionHeader, sectionHeaderType, transposeBassLine } from './chordFormatter';
+import { cleanSectionHeader, isChordLine, isSectionHeader, sectionHeaderType, stripNoChordMarkers, transposeBassLine } from './chordFormatter';
 
 export type Row =
 	| { kind: 'blank' }
@@ -28,7 +28,13 @@ export function parseRows(rawInput: string): Row[] {
 			continue;
 		}
 		if (isChordLine(line)) {
-			rows.push({ kind: 'chord', text: line });
+			rows.push({ kind: 'chord', text: stripNoChordMarkers(line) });
+			continue;
+		}
+		// En linje der KUN er "no chord"-markører (fx "N.C.") er et break uden
+		// akkorder — vi dropper markøren og efterlader en tom linje.
+		if (line.trim() !== '' && stripNoChordMarkers(line).trim() === '') {
+			rows.push({ kind: 'blank' });
 			continue;
 		}
 		rows.push({ kind: 'lyric', text: line });
@@ -52,13 +58,16 @@ function replaceWideChordGaps(line: string): string {
  * Engangs-normalisering til importerede/pastede sange: UG bruger ofte
  * brede mellemrum til akkordplacering, men editoren kollapser whitespace
  * visuelt. Vi gør kun de store gaps eksplicitte med `-` placeholders.
+ * Samtidig fjernes evt. "no chord"-markører (N.C. o.l.) fra akkord-rækker.
  */
 export function normalizeImportedChordSpacing(rows: Row[]): Row[] {
-	return rows.map((row) =>
-		row.kind === 'chord' && /\s{3,}/.test(row.text)
-			? { kind: 'chord', text: replaceWideChordGaps(row.text) }
-			: row
-	);
+	return rows.map((row) => {
+		if (row.kind !== 'chord') return row;
+		const stripped = stripNoChordMarkers(row.text);
+		if (stripped.trim() === '') return { kind: 'blank' };
+		const text = /\s{3,}/.test(stripped) ? replaceWideChordGaps(stripped) : stripped;
+		return text === row.text ? row : { kind: 'chord', text };
+	});
 }
 
 export function serializeRows(rows: Row[]): string {
