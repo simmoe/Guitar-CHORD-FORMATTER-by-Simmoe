@@ -839,6 +839,7 @@
 		class:rhythm-cell-empty={!hasBass}
 		class:drop-target={dropTarget?.rowIdx === i && dropTarget?.col === 'bass'}
 		class:drag-source={dragInfo?.rowIdx === i && dragInfo?.col === 'bass'}
+		data-row={i}
 		title={readOnly ? undefined : hasBass ? 'Klik for at redigere · træk for at kopiere bass-linjen' : 'Klik for at starte en baslinje'}
 		draggable={readOnly || !hasBass ? 'false' : 'true'}
 		onmouseenter={readOnly ? undefined : hideRowToolbar}
@@ -1475,6 +1476,7 @@
 		.editable-song .rhythm-cell-clickable {
 			cursor: auto;
 			background: transparent !important;
+			box-shadow: none !important;
 		}
 	}
 	.editable-song .lyric-cell {

@@ -24,6 +24,7 @@
 	import SongMetaForm from '$lib/components/SongMetaForm.svelte';
 	import { exportAudienceSongbookAsPdf, exportSongsAsPdf } from '$lib/pdf';
 	import { assignMissingCategoryColors, hasSameCategoryColors } from '$lib/categoryColors';
+	import { tick } from 'svelte';
 	import type {
 		BassLines,
 		CategoryColorMap,
@@ -328,6 +329,95 @@
 		}
 	}
 
+	// ───── Spil: ultrasmooth løbende scroll (ingen highlight/BPM) ─────────
+	/** Ved ×1 scroller hele siden igennem på ca. denne tid (en typisk sang). */
+	const PLAY_FULL_PAGE_SEC = 165;
+	/** Hver − / + dividerer eller ganger tempoet med denne faktor. */
+	const PLAY_SPEED_FACTOR = 1.25;
+
+	let playing = $state(false);
+	let playSpeed = $state(1);
+	let playRaf: number | null = null;
+	let playLastTs = 0;
+	/** Fractional scroll-position — undgår at sub-pixel-deltaer forsvinder via scrollY. */
+	let playPos = 0;
+
+	function stopPlay(): void {
+		playing = false;
+		playLastTs = 0;
+		if (playRaf != null) {
+			cancelAnimationFrame(playRaf);
+			playRaf = null;
+		}
+	}
+
+	function slowerPlay(): void {
+		playSpeed = playSpeed / PLAY_SPEED_FACTOR;
+	}
+
+	function fasterPlay(): void {
+		playSpeed = playSpeed * PLAY_SPEED_FACTOR;
+	}
+
+	function formatPlaySpeed(s: number): string {
+		return String(Number(s.toPrecision(3)));
+	}
+
+	function playFrame(ts: number): void {
+		if (!playing) return;
+		if (!playLastTs) playLastTs = ts;
+		const dt = Math.min(0.05, (ts - playLastTs) / 1000);
+		playLastTs = ts;
+
+		const maxScroll = Math.max(
+			0,
+			document.documentElement.scrollHeight - window.innerHeight
+		);
+		if (maxScroll <= 0) {
+			stopPlay();
+			return;
+		}
+		const pxPerSec = (maxScroll / PLAY_FULL_PAGE_SEC) * playSpeed;
+		playPos = Math.min(maxScroll, playPos + pxPerSec * dt);
+		window.scrollTo(0, playPos);
+
+		if (playPos >= maxScroll - 0.5) {
+			stopPlay();
+			return;
+		}
+		playRaf = requestAnimationFrame(playFrame);
+	}
+
+	async function startPlay(): Promise<void> {
+		if (playing) {
+			stopPlay();
+			return;
+		}
+		if (collapsedSections.length > 0) {
+			collapsedSections = [];
+			scheduleSave();
+			await tick();
+			await new Promise<void>((r) => requestAnimationFrame(() => r()));
+		}
+		playing = true;
+		playLastTs = 0;
+		playPos = window.scrollY;
+		playRaf = requestAnimationFrame(playFrame);
+	}
+
+	$effect(() => {
+		if (!playing) return;
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') stopPlay();
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	});
+
+	$effect(() => {
+		return () => stopPlay();
+	});
+
 	$effect(() => {
 		const handler = () => {
 			if (saveTimer) {
@@ -532,6 +622,61 @@
 				til højre for at åbne en modal og redigere linjen i pipe-notation. Ændringer gemmes
 				automatisk.
 			</p>
+
+			<div
+				class="play-controls no-print"
+				class:is-playing={playing}
+				title="Løbende scroll gennem sangen"
+			>
+				<button
+					type="button"
+					class="play-side"
+					onclick={slowerPlay}
+					title={`Langsommere (÷${PLAY_SPEED_FACTOR}) · nu ×${formatPlaySpeed(playSpeed)}`}
+					aria-label="Langsommere"
+					>−</button
+				>
+				<button
+					type="button"
+					class="play-main"
+					onclick={startPlay}
+					title={playing
+						? `Stop (Esc) · tempo ×${formatPlaySpeed(playSpeed)}`
+						: `Løbende scroll · tempo ×${formatPlaySpeed(playSpeed)}`}
+				>
+					{#if playing}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							aria-hidden="true"
+							><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg
+						>
+						Stop
+					{:else}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							aria-hidden="true"
+							><path d="M8 5v14l11-7z"></path></svg
+						>
+						Spil
+					{/if}
+				</button>
+				<button
+					type="button"
+					class="play-side"
+					onclick={fasterPlay}
+					title={`Hurtigere (×${PLAY_SPEED_FACTOR}) · nu ×${formatPlaySpeed(playSpeed)}`}
+					aria-label="Hurtigere"
+					>+</button
+				>
+			</div>
 		</article>
 	{/if}
 </main>
@@ -553,6 +698,75 @@
 	}
 	.print-toggle input {
 		accent-color: var(--color-accent);
+	}
+	.play-controls {
+		position: fixed;
+		bottom: 1.25rem;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 60;
+		display: inline-flex;
+		align-items: stretch;
+		border: 1px solid var(--color-border-subtle);
+		border-radius: var(--radius-button);
+		overflow: hidden;
+		background: #ffffff;
+		box-shadow: 0 8px 22px rgba(15, 23, 42, 0.14);
+		transition: box-shadow 160ms ease, border-color 160ms ease;
+	}
+	.play-controls.is-playing {
+		border-color: var(--color-accent);
+		box-shadow: 0 10px 28px rgba(15, 23, 42, 0.2);
+	}
+	.play-controls .play-side,
+	.play-controls .play-main {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.45rem;
+		margin: 0;
+		border: none;
+		border-radius: 0;
+		background: transparent;
+		color: var(--color-ink);
+		font-weight: 600;
+		font-size: 0.9rem;
+		cursor: pointer;
+		transition: background 120ms ease, color 120ms ease;
+	}
+	.play-controls .play-side {
+		min-width: 2.4rem;
+		padding: 0.55rem 0.65rem;
+		font-size: 1.15rem;
+		line-height: 1;
+		color: var(--color-ink-muted);
+	}
+	.play-controls .play-side:first-child {
+		border-right: 1px solid var(--color-border-subtle);
+	}
+	.play-controls .play-side:last-child {
+		border-left: 1px solid var(--color-border-subtle);
+	}
+	.play-controls .play-main {
+		padding: 0.55rem 1rem;
+		min-width: 5.5rem;
+	}
+	.play-controls .play-side:hover,
+	.play-controls .play-main:hover {
+		background: #f3f4f6;
+	}
+	.play-controls.is-playing .play-main {
+		background: var(--color-accent);
+		color: #ffffff;
+	}
+	.play-controls.is-playing .play-main:hover {
+		background: var(--color-accent-hover);
+	}
+	.play-controls.is-playing .play-side {
+		color: var(--color-ink);
+	}
+	.play-controls.is-playing .play-side:hover {
+		background: rgba(245, 158, 11, 0.12);
 	}
 	.title-row {
 		display: flex;

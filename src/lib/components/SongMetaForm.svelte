@@ -80,6 +80,10 @@
 			addCategory(categoryDraft);
 		}
 	}
+
+	function onCategoryBlur() {
+		addCategory(categoryDraft);
+	}
 </script>
 
 <div class="grid gap-4 sm:grid-cols-2">
@@ -124,19 +128,16 @@
 
 	<div class="field sm:col-span-2">
 		<span>Kategorier <em class="text-[var(--color-ink-faint)] font-normal text-xs">(koncerter, fx Summertime, Forår, Julen)</em></span>
-		<div class="cat-input-wrap">
-			<input
-				type="text"
-				list="known-categories"
-				bind:value={categoryDraft}
-				oninput={(e) => onCategoryInput(e.currentTarget.value)}
-				onkeydown={onCategoryKey}
-				placeholder="Skriv kategori og tryk Enter…"
-			/>
-			<button type="button" class="btn-secondary btn-sm" onclick={() => addCategory(categoryDraft)}>
-				Tilføj
-			</button>
-		</div>
+		<input
+			class="cat-input"
+			type="text"
+			list="known-categories"
+			bind:value={categoryDraft}
+			oninput={(e) => onCategoryInput(e.currentTarget.value)}
+			onkeydown={onCategoryKey}
+			onblur={onCategoryBlur}
+			placeholder="Vælg eller skriv kategori — Enter eller klik væk"
+		/>
 		<datalist id="known-categories">
 			{#each knownCategories as c (c)}<option value={c}></option>{/each}
 		</datalist>
@@ -181,7 +182,7 @@
 		color: var(--color-error);
 	}
 	.field input,
-	.cat-input-wrap input {
+	.cat-input {
 		width: 100%;
 		padding: 0.55rem 0.75rem;
 		border-radius: var(--radius-button);
@@ -191,13 +192,9 @@
 		font-size: 0.95rem;
 	}
 	.field input:focus,
-	.cat-input-wrap input:focus {
+	.cat-input:focus {
 		outline: none;
 		border-color: var(--color-accent);
-	}
-	.cat-input-wrap {
-		display: flex;
-		gap: 0.5rem;
 	}
 	.bass-bars-actions {
 		display: inline-flex;
@@ -217,9 +214,6 @@
 	}
 	.bass-bars-actions button:hover {
 		background: #15803d;
-	}
-	.cat-input-wrap input {
-		flex: 1 1 auto;
 	}
 	.cat-tag {
 		display: inline-flex;
