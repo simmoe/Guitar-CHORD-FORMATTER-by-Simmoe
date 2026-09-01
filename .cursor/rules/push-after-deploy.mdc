@@ -1,0 +1,20 @@
+---
+description: Push to GitHub after deploy so remote matches live/local
+alwaysApply: true
+---
+
+# Push efter deploy
+
+Når vi deployer til live (`firebase deploy` / `npm run deploy:web` / functions), skal ændringerne også på GitHub i samme arbejdsgang — medmindre Simon eksplicit siger noget andet.
+
+## Rækkefølge
+
+1. Commit relevante filer (ingen secrets, ingen scratch/`diverse/` medmindre bedt)
+2. Deploy
+3. `git push` til den branch der allerede er checked out (typisk `master`)
+
+## Husk
+
+- Live foran GitHub = dårlig default. Sig det højt hvis der er uncommitted eller unpushed work efter deploy.
+- Push ikke force til main/master.
+- Opret ikke branches bare for at “arbejde rent”.

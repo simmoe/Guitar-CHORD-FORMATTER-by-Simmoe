@@ -273,12 +273,12 @@ select {
 	visibility: hidden !important;
 }
 .no-bass-tabs .editable-song.chord-grid {
-	grid-template-columns: minmax(0, 1fr) 6em !important;
-	column-gap: 1em !important;
+	grid-template-columns: minmax(0, 1fr) 4em !important;
+	column-gap: 0.6em !important;
 }
 .no-bass-tabs .pdf-section-grid {
-	grid-template-columns: minmax(0, 1fr) 18mm !important;
-	column-gap: calc(3mm * var(--pdf-layout-scale, 1)) !important;
+	grid-template-columns: minmax(0, 1fr) 12mm !important;
+	column-gap: calc(2mm * var(--pdf-layout-scale, 1)) !important;
 }
 
 /* PDF-snapshot: udnyt A4-arealet. Den normale card-padding er rar på
@@ -303,8 +303,8 @@ select {
 .no-bass-tabs.pdf-snapshot-page .print-page .chord-grid,
 .pdf-snapshot-page .no-bass-tabs.print-page .chord-grid,
 .pdf-snapshot-page .print-page.no-bass-tabs .chord-grid {
-	grid-template-columns: minmax(0, 172mm) 18mm !important;
-	column-gap: 3mm !important;
+	grid-template-columns: minmax(0, 178mm) 12mm !important;
+	column-gap: 2mm !important;
 }
 .pdf-snapshot-page.print-page .lyrics-cell,
 .pdf-snapshot-page .print-page .lyrics-cell {
@@ -335,7 +335,7 @@ select {
 }
 .pdf-song-sections {
 	display: grid;
-	gap: 0;
+	gap: calc(1mm * var(--pdf-layout-scale, 1));
 }
 .pdf-song-section {
 	--section-accent: #6b7280;

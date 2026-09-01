@@ -6,6 +6,7 @@
 		createSong,
 		saveCategoryColors,
 		subscribeCategoryColors,
+		subscribeCategoryMeta,
 		subscribeSongs
 	} from '$lib/firebase/songs';
 	import { fetchUgTab, type UgFetchErrorDetails } from '$lib/firebase/ug';
@@ -28,7 +29,7 @@
 		assignMissingCategoryColors,
 		hasSameCategoryColors
 	} from '$lib/categoryColors';
-	import type { CategoryColorMap, SongDoc } from '$lib/types';
+	import type { CategoryColorMap, CategoryMetaMap, SongDoc } from '$lib/types';
 
 	$effect(() => {
 		if (!authState.loading && !authState.user) goto('/login');
@@ -36,6 +37,7 @@
 
 	let allSongs = $state<SongDoc[]>([]);
 	let categoryColorMap = $state<CategoryColorMap>({});
+	let categoryMetaMap = $state<CategoryMetaMap>({});
 	$effect(() => {
 		if (!authState.user) return;
 		const unsub = subscribeSongs((s) => (allSongs = s));
@@ -46,7 +48,16 @@
 		const unsub = subscribeCategoryColors((colors) => (categoryColorMap = colors));
 		return () => unsub();
 	});
-	const knownCategories = $derived(uniqueCategoriesFromSongs(allSongs));
+	$effect(() => {
+		if (!authState.user) return;
+		const unsub = subscribeCategoryMeta((meta) => (categoryMetaMap = meta));
+		return () => unsub();
+	});
+	const songCategories = $derived(uniqueCategoriesFromSongs(allSongs));
+	const knownCategories = $derived.by(() => {
+		const names = new Set([...songCategories, ...Object.keys(categoryMetaMap)]);
+		return [...names].sort((a, b) => a.localeCompare(b, 'da'));
+	});
 	const effectiveCategoryColorMap = $derived(
 		assignMissingCategoryColors(knownCategories, categoryColorMap)
 	);

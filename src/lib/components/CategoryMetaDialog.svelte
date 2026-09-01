@@ -9,9 +9,9 @@
 		error?: string | null;
 		onClose: () => void;
 		onAddCategory: (category: string) => void;
-		onRenameCategory: (from: string, to: string) => void;
+		onRenameCategory: (from: string, to: string) => void | Promise<void>;
 		onDeleteCategory: (category: string) => void;
-		onSave: (category: string, meta: CategoryMeta) => void;
+		onSave: (category: string, meta: CategoryMeta) => void | Promise<void>;
 		onUploadImage: (category: string, file: File) => void;
 		onRemoveImage: (category: string) => void;
 	}
@@ -52,17 +52,24 @@
 		introText = meta.introText ?? '';
 	});
 
-	function handleSubmit() {
+	async function handleSubmit() {
 		if (!selectedCategory) return;
 		const nextName = displayName.trim();
-		if (nextName && nextName !== selectedCategory) {
-			onRenameCategory(selectedCategory, nextName);
-			selectedCategory = nextName;
-		}
-		onSave(nextName || selectedCategory, {
+		const categoryToSave = nextName || selectedCategory;
+		const metaToSave = {
 			...meta,
 			introText: introText.trim()
-		});
+		};
+		try {
+			if (nextName && nextName !== selectedCategory) {
+				await onRenameCategory(selectedCategory, nextName);
+				selectedCategory = nextName;
+			}
+			await onSave(categoryToSave, metaToSave);
+			onClose();
+		} catch {
+			// Parent sets the visible error; keep the modal open.
+		}
 	}
 
 	function handleFileChange(e: Event) {
@@ -95,7 +102,6 @@
 				<p class="category-modal-kicker">Kategorier</p>
 				<h2 id="category-meta-title">Redigér publikums-kategorier</h2>
 			</div>
-			<button type="button" class="btn-ghost" onclick={onClose}>Luk</button>
 		</header>
 
 		<div class="category-admin-grid">
@@ -194,7 +200,6 @@
 		{/if}
 
 		<footer class="category-modal-footer">
-			<button type="button" class="btn-ghost" onclick={onClose}>Annuller</button>
 			{#if selectedCategory}
 				<button type="button" class="btn-primary" onclick={handleSubmit} disabled={saving || uploading}>
 					{saving ? 'Gemmer…' : 'Gem kategori'}

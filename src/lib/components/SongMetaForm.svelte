@@ -48,11 +48,24 @@
 	function addCategory(cat: string) {
 		const trimmed = cat.trim();
 		if (!trimmed) return;
-		if (categories.includes(trimmed)) return;
+		if (categories.some((c) => c.toLocaleLowerCase('da') === trimmed.toLocaleLowerCase('da'))) {
+			categoryDraft = '';
+			return;
+		}
 		const next = [...categories, trimmed];
 		categories = next;
 		categoryDraft = '';
 		emit({ categories: next });
+	}
+
+	function onCategoryInput(value: string) {
+		categoryDraft = value;
+		const trimmed = value.trim();
+		if (!trimmed) return;
+		const existing = knownCategories.find(
+			(cat) => cat.toLocaleLowerCase('da') === trimmed.toLocaleLowerCase('da')
+		);
+		if (existing) addCategory(existing);
 	}
 
 	function removeCategory(cat: string) {
@@ -116,6 +129,7 @@
 				type="text"
 				list="known-categories"
 				bind:value={categoryDraft}
+				oninput={(e) => onCategoryInput(e.currentTarget.value)}
 				onkeydown={onCategoryKey}
 				placeholder="Skriv kategori og tryk Enter…"
 			/>

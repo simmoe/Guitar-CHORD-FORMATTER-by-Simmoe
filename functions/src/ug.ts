@@ -662,10 +662,19 @@ export function cleanUgContent(s: string): string {
  *   - "** Alternates:" / "* Alternate" sektion-headers
  *   - UG-forfatterkommentarer efter sangen: "* It has been suggested..."
  *   - "Open (These chords are not in the original key)"
+ *   - Jina/UG sideindhold efter sangen: closing code fence, rating,
+ *     strumming, related tabs, footer/navigation.
  */
 function stripTrailingUgJunk(text: string): string {
 	const CHORD_TOKEN = '[A-G][#b]?(?:m|maj|min|dim|sus|add)?\\d?';
 	const JUNK_PATTERNS: RegExp[] = [
+		/^\s*```\s*$/,
+		/^\s*Print\s+Create\s+correction\s+Report\s+bad\s+tab\s*$/i,
+		/^\s*Last\s+update:\s+/i,
+		/^\s*Rating\s*$/i,
+		/^\s*Please,\s*rate\s+this\s+tab\s*$/i,
+		/^\s*##\s+(?:Play\s+next|Chords|Strumming\s+pattern|Get\s+effects|Related\s+tabs)\s*$/i,
+		/^\s*There\s+is\s+no\s+strumming\s+pattern\s+for\s+this\s+song\s+yet\b/i,
 		/^\s*\*+\s+(?:it\s+has\s+been\s+suggested|suggested|note|notes?|this\s+song|you\s+can|thanks?|please|rate)\b/i,
 		/^\s*Capo\s+(?:I+|VI*|IX|X|\d+)\s*$/i,
 		new RegExp(`^\\s*${CHORD_TOKEN}\\s*=\\s*${CHORD_TOKEN}\\s*$`),
@@ -681,6 +690,7 @@ function stripTrailingUgJunk(text: string): string {
 			// efterlader trailing whitespace.
 			let cutIdx = i;
 			while (cutIdx > 0 && lines[cutIdx - 1].trim() === '') cutIdx--;
+			if (cutIdx > 0 && lines[cutIdx - 1].trim() === 'X') cutIdx--;
 			return lines.slice(0, cutIdx).join('\n').trimEnd();
 		}
 	}

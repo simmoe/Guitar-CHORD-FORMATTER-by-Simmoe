@@ -19,7 +19,13 @@ import { mount, unmount, tick } from 'svelte';
 import AudienceSongbook from './components/AudienceSongbook.svelte';
 import ChordSongbookCover from './components/ChordSongbookCover.svelte';
 import PrintableSong from './components/PrintableSong.svelte';
+import SongbookToc from './components/SongbookToc.svelte';
 import { categoryImageDataUrl } from './firebase/images';
+import {
+	buildSongbookTocPages,
+	tocPageCountForSongs,
+	type SongbookTocSong
+} from './songbookToc';
 import type { CategoryMeta, SongDoc } from './types';
 
 export type SongbookPrintEntry =
@@ -311,8 +317,8 @@ async function pagesToPdf(pages: HTMLElement[], opts: ExportOptions): Promise<vo
  * Eksporter en eller flere SongDoc'er til PDF. Mounter `PrintableSong`
  * off-screen for hver sang, fanger snapshot, og pakker dem i én PDF.
  *
- * Brug på song detail-siden (én sang) og evt. som alternativ til print-
- * sidens browser-print (flere sange).
+ * Sangbogs-export (`includeCover`) får samme indholdsfortegnelse som
+ * publikums-PDF'en: cover → indhold → sange/sæt.
  */
 export async function exportSongsAsPdf(
 	songs: SongDoc[] | SongbookPrintEntry[],
@@ -335,6 +341,11 @@ export async function exportSongsAsPdf(
 
 	const components: ReturnType<typeof mount>[] = [];
 	const pageEls: HTMLElement[] = [];
+	const contentMounts: Array<{
+		el: HTMLElement;
+		entry: SongbookPrintEntry;
+		component?: ReturnType<typeof mount>;
+	}> = [];
 	const coverMeta = await inlineCategoryImage(opts.coverMeta);
 	if (opts.includeCover) {
 		const coverDiv = document.createElement('div');
@@ -362,6 +373,7 @@ export async function exportSongsAsPdf(
 		if (entry.type === 'set') {
 			pageDiv.dataset.fitSinglePage = 'false';
 			pageDiv.innerHTML = setBreakPageHtml(entry.label);
+			contentMounts.push({ el: pageDiv, entry });
 		} else {
 			const song = entry.song;
 			pageDiv.style.padding = OFFSCREEN_PAGE_PADDING;
@@ -371,6 +383,7 @@ export async function exportSongsAsPdf(
 			}
 			const c = mount(PrintableSong, { target: pageDiv, props: { song } });
 			components.push(c);
+			contentMounts.push({ el: pageDiv, entry, component: c });
 		}
 		pageEls.push(pageDiv);
 	}
@@ -381,12 +394,98 @@ export async function exportSongsAsPdf(
 	await waitForImages(wrapper);
 	await waitForLayout();
 
+	if (opts.includeCover) {
+		await insertChordSongbookToc({
+			wrapper,
+			pageEls,
+			contentMounts,
+			components
+		});
+		await tick();
+		await waitForLayout();
+	}
+
 	try {
 		await pagesToPdf(pageEls, opts);
 	} finally {
 		for (const c of components) unmount(c);
 		document.body.removeChild(wrapper);
 	}
+}
+
+async function insertChordSongbookToc(args: {
+	wrapper: HTMLElement;
+	pageEls: HTMLElement[];
+	contentMounts: Array<{
+		el: HTMLElement;
+		entry: SongbookPrintEntry;
+		component?: ReturnType<typeof mount>;
+	}>;
+	components: ReturnType<typeof mount>[];
+}): Promise<void> {
+	const { wrapper, pageEls, contentMounts, components } = args;
+	const songCount = contentMounts.filter((item) => item.entry.type === 'song').length;
+	if (songCount === 0) return;
+	const tocCount = tocPageCountForSongs(songCount);
+
+	let cursor = 2 + tocCount;
+	const tocSongs: SongbookTocSong[] = [];
+
+	for (const item of contentMounts) {
+		const pageCount = await estimatePdfPageCount(item.el);
+		if (item.entry.type === 'song') {
+			tocSongs.push({
+				id: item.entry.song.id,
+				title: item.entry.song.title,
+				artist: item.entry.song.artist,
+				page: cursor
+			});
+			if (item.component) {
+				unmount(item.component);
+				const idx = components.indexOf(item.component);
+				if (idx >= 0) components.splice(idx, 1);
+			}
+			item.el.replaceChildren();
+			const c = mount(PrintableSong, {
+				target: item.el,
+				props: { song: item.entry.song, pageNumber: cursor }
+			});
+			item.component = c;
+			components.push(c);
+			if ((item.entry.withBassTabs ?? item.entry.song.showBassTabs ?? true) === false) {
+				item.el.classList.add('no-bass-tabs');
+			}
+		}
+		cursor += pageCount;
+	}
+
+	const coverEl = pageEls[0];
+	const tocHost = document.createElement('div');
+	wrapper.insertBefore(tocHost, coverEl?.nextSibling ?? null);
+	const tocComponent = mount(SongbookToc, {
+		target: tocHost,
+		props: { pages: buildSongbookTocPages(tocSongs) }
+	});
+	components.push(tocComponent);
+	await tick();
+
+	const tocPageEls = [...tocHost.querySelectorAll<HTMLElement>('.songbook-toc-page')];
+	for (const tocPage of tocPageEls) tocPage.classList.add('pdf-snapshot-page');
+	pageEls.splice(1, 0, ...tocPageEls);
+}
+
+async function estimatePdfPageCount(pageEl: HTMLElement): Promise<number> {
+	const usableW = 210 - PDF_MARGIN_MM * 2;
+	const usableH = 297 - PDF_MARGIN_MM * 2;
+	const widthPx = pageEl.getBoundingClientRect().width || pageEl.scrollWidth;
+	if (widthPx <= 0) return 1;
+	const targetHeightPx = widthPx * (usableH / usableW) * FIT_HEIGHT_SAFETY;
+	const pageFitSinglePage = pageEl.dataset.fitSinglePage !== 'false';
+	const saved = await applyLayoutScale(pageEl, targetHeightPx, pageFitSinglePage);
+	const height = Math.max(pageEl.scrollHeight, pageEl.getBoundingClientRect().height);
+	restoreStyles(pageEl, saved);
+	if (height <= 0 || targetHeightPx <= 0) return 1;
+	return Math.max(1, Math.ceil(height / targetHeightPx - 1e-6));
 }
 
 function normalizePrintEntries(input: SongDoc[] | SongbookPrintEntry[]): SongbookPrintEntry[] {

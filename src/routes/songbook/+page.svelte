@@ -104,8 +104,12 @@
 	});
 
 	const categories = $derived(uniqueCategoriesFromSongs(songs));
+	const allCategoryNames = $derived.by(() => {
+		const names = new Set([...categories, ...Object.keys(categoryMetaMap)]);
+		return [...names].sort((a, b) => a.localeCompare(b, 'da'));
+	});
 	const effectiveCategoryColorMap = $derived(
-		assignMissingCategoryColors(categories, categoryColorMap)
+		assignMissingCategoryColors(allCategoryNames, categoryColorMap)
 	);
 
 	$effect(() => {
@@ -131,7 +135,7 @@
 	});
 
 	$effect(() => {
-		if (!authState.user || categories.length === 0) return;
+		if (!authState.user || allCategoryNames.length === 0) return;
 		if (!hasSameCategoryColors(effectiveCategoryColorMap, categoryColorMap)) {
 			void saveCategoryColors(effectiveCategoryColorMap);
 		}
@@ -140,11 +144,6 @@
 	function colorForCategory(cat: string) {
 		return paletteColorForCategory(cat, effectiveCategoryColorMap);
 	}
-
-	const allCategoryNames = $derived.by(() => {
-		const names = new Set([...categories, ...Object.keys(categoryMetaMap)]);
-		return [...names].sort((a, b) => a.localeCompare(b, 'da'));
-	});
 
 	const recentCategories = $derived.by(() =>
 		[...allCategoryNames]
@@ -349,6 +348,7 @@
 			});
 		} catch (err) {
 			categoryError = err instanceof Error ? err.message : 'Kunne ikke gemme kategori.';
+			throw err;
 		} finally {
 			categorySaving = false;
 		}
@@ -387,6 +387,7 @@
 			if (printCategory === from) printCategory = nextName;
 		} catch (err) {
 			categoryError = err instanceof Error ? err.message : 'Kunne ikke omdøbe kategori.';
+			throw err;
 		} finally {
 			categorySaving = false;
 		}

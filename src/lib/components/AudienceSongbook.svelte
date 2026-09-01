@@ -2,6 +2,12 @@
 	import { sectionHeaderType } from '$lib/chordFormatter';
 	import { buildSections, parseRows, type Row } from '$lib/songParse';
 	import type { CategoryMeta, SongDoc } from '$lib/types';
+	import SongbookToc from './SongbookToc.svelte';
+	import {
+		buildSongbookTocPages,
+		tocPageCountForSongs,
+		type SongbookTocPage
+	} from '$lib/songbookToc';
 
 	interface Props {
 		title: string;
@@ -26,15 +32,8 @@
 		scale: number;
 	}
 
-	interface TocPage {
-		number: number;
-		songs: AudienceSong[];
-	}
-
-	const TOC_ITEMS_PER_PAGE = 28;
-
 	const baseSongs = $derived(songs.map(toAudienceSong).filter((song) => song.lines.length > 0));
-	const tocPageCount = $derived(Math.max(1, Math.ceil(baseSongs.length / TOC_ITEMS_PER_PAGE)));
+	const tocPageCount = $derived(tocPageCountForSongs(baseSongs.length));
 	const firstSongPage = $derived(2 + tocPageCount);
 	const audienceSongs = $derived(assignPages(baseSongs, firstSongPage));
 	const tocPages = $derived(buildTocPages(audienceSongs));
@@ -145,15 +144,15 @@
 		}));
 	}
 
-	function buildTocPages(input: AudienceSong[]): TocPage[] {
-		const pages: TocPage[] = [];
-		for (let i = 0; i < input.length; i += TOC_ITEMS_PER_PAGE) {
-			pages.push({
-				number: 2 + pages.length,
-				songs: input.slice(i, i + TOC_ITEMS_PER_PAGE)
-			});
-		}
-		return pages.length > 0 ? pages : [{ number: 2, songs: [] }];
+	function buildTocPages(input: AudienceSong[]): SongbookTocPage[] {
+		return buildSongbookTocPages(
+			input.map((song) => ({
+				id: song.id,
+				title: song.title,
+				artist: song.artist,
+				page: song.page
+			}))
+		);
 	}
 </script>
 
@@ -172,23 +171,7 @@
 		</div>
 	</section>
 
-	{#each tocPages as tocPage, index (tocPage.number)}
-		<section class="audience-page audience-toc" data-fit-single-page="false">
-			<h2>{index === 0 ? 'Indhold' : 'Indhold fortsat'}</h2>
-			<ol>
-				{#each tocPage.songs as song}
-					<li>
-						<div>
-							<span>{song.title}</span>
-							{#if song.artist}<small>{song.artist}</small>{/if}
-						</div>
-						<strong>{song.page}</strong>
-					</li>
-				{/each}
-			</ol>
-			<footer class="audience-page-number">{tocPage.number}</footer>
-		</section>
-	{/each}
+	<SongbookToc pages={tocPages} />
 
 	{#each audienceSongs as song (song.id)}
 		<section class="audience-page audience-song-page" data-fit-single-page="false">
@@ -272,46 +255,6 @@
 		font-size: 13pt;
 		line-height: 1.55;
 		color: #334155;
-	}
-	.audience-toc {
-		padding-top: 20mm;
-	}
-	.audience-toc h2 {
-		margin: 0 0 13mm;
-		font-family: var(--font-display);
-		font-size: 25pt;
-		color: #172033;
-	}
-	.audience-toc ol {
-		margin: 0;
-		padding: 0;
-		columns: 2;
-		column-gap: 12mm;
-		list-style: none;
-	}
-	.audience-toc li {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 3mm;
-		break-inside: avoid;
-		margin: 0 0 4.2mm;
-		padding-bottom: 2.6mm;
-		border-bottom: 1px solid #eef1f5;
-		font-size: 10.8pt;
-		font-weight: 700;
-	}
-	.audience-toc strong {
-		color: #9a6a12;
-		font-family: var(--font-display);
-		font-size: 10.5pt;
-	}
-	.audience-toc small {
-		display: block;
-		margin-top: 0.6mm;
-		color: #6b7280;
-		font-size: 8.3pt;
-		font-weight: 400;
 	}
 	.audience-song-page {
 		padding-top: 20mm;

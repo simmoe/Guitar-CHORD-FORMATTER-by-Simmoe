@@ -13,8 +13,10 @@
 
 	interface Props {
 		song: SongDoc;
+		/** Optional page number shown in the PDF footer (songbook exports). */
+		pageNumber?: number;
 	}
-	const { song }: Props = $props();
+	const { song, pageNumber }: Props = $props();
 
 	const semitones = $derived(song.transpose ?? 0);
 	const baseRows = $derived(song.rows ?? parseRows(song.rawInput ?? ''));
@@ -120,4 +122,21 @@
 			</section>
 		{/each}
 	</div>
+	{#if pageNumber != null}
+		<footer class="pdf-page-number">{pageNumber}</footer>
+	{/if}
 </article>
+
+<style>
+	.print-page {
+		position: relative;
+	}
+	.pdf-page-number {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		color: #9ca3af;
+		font-family: var(--font-display);
+		font-size: 9pt;
+	}
+</style>

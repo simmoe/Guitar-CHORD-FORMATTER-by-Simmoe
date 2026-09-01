@@ -8,6 +8,7 @@
 		getSong,
 		saveCategoryColors,
 		subscribeCategoryColors,
+		subscribeCategoryMeta,
 		subscribeSongs,
 		updateSong
 	} from '$lib/firebase/songs';
@@ -26,6 +27,7 @@
 	import type {
 		BassLines,
 		CategoryColorMap,
+		CategoryMetaMap,
 		CollapsedSections,
 		SongDoc
 	} from '$lib/types';
@@ -47,6 +49,7 @@
 	let bassLines = $state<BassLines>({});
 	let collapsedSections = $state<CollapsedSections>([]);
 	let categoryColorMap = $state<CategoryColorMap>({});
+	let categoryMetaMap = $state<CategoryMetaMap>({});
 	let showBassTabs = $state(true);
 	let fitSinglePage = $state(true);
 
@@ -56,7 +59,11 @@
 		const unsub = subscribeSongs((s) => (allSongs = s));
 		return () => unsub();
 	});
-	const knownCategories = $derived(uniqueCategoriesFromSongs(allSongs));
+	const songCategories = $derived(uniqueCategoriesFromSongs(allSongs));
+	const knownCategories = $derived.by(() => {
+		const names = new Set([...songCategories, ...Object.keys(categoryMetaMap)]);
+		return [...names].sort((a, b) => a.localeCompare(b, 'da'));
+	});
 	const effectiveCategoryColorMap = $derived(
 		assignMissingCategoryColors(knownCategories, categoryColorMap)
 	);
@@ -64,6 +71,11 @@
 	$effect(() => {
 		if (!authState.user) return;
 		const unsub = subscribeCategoryColors((colors) => (categoryColorMap = colors));
+		return () => unsub();
+	});
+	$effect(() => {
+		if (!authState.user) return;
+		const unsub = subscribeCategoryMeta((meta) => (categoryMetaMap = meta));
 		return () => unsub();
 	});
 
